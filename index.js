@@ -27,11 +27,30 @@ app.listen(port, () => {
     console.log(`Investory backend listening on port ${port}`);
 });
 
+// Used in the dashboard to see the first 3 big articles
+app.get("/getTopNews", (req, res) => {
+    // fetch the news
+    finnhubClient.marketNews("general", {}, (error, data, response) => {
+        if (error) {
+            res.status(500).json({ error: "Failed to fetch news" });
+        } else {
+            console.log("Successfully fetched the data");
+            const firstFewArticles = data.slice(0, 3);
+            res.json(firstFewArticles); // Send fetched data back to the client
+        }
+    });
+});
+
+// Used in the latest news page
 app.get("/getNews", (req, res) => {
     // fetch the news
     finnhubClient.marketNews("general", {}, (error, data, response) => {
-        // console.log(data);
-        console.log("Successfully fetched the data");
+        if (error) {
+            res.status(500).json({ error: "Failed to fetch news" });
+        } else {
+            console.log("Successfully fetched the data");
+            res.json(data); // Send fetched data back to the client
+        }
     });
 });
 
