@@ -1,5 +1,8 @@
+'use strict'
+
 const dotenv = require("dotenv");
 const finnhub = require("finnhub");
+const request = require("request");
 const express = require("express");
 const cors = require("cors");
 
@@ -83,4 +86,32 @@ app.get("/getIndices", async (req, res) => {
         console.error("Error fetching indices:", error);
         res.status(500).json({ error: "Failed to fetch indices", details: error });
     }
+});
+
+// app.get("/getQuotes", (req, res) => {
+//     finnhubClient.quote(req.)
+// });
+
+
+app.get("/getTopGainersLosers", (req, res) => {
+    let url = 'https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=6K3LBRGQSVWFLNLK';
+    request.get({
+        url: url,
+        json: true,
+        headers: {'User-Agent': 'request'}
+      }, (error, response, data) => {
+        if (error) {
+            console.error("Error fetching data:", error);
+            res.status(500).json({ error: "Failed to fetch data from Alpha Vantage" });
+        } else if (res.statusCode !== 200) {
+            console.error("Unexpected status code: ", response.statusCode);
+            res.status(response.statusCode).json({error: "Unexpected status code from Alpha Vantage"});
+        } else {
+            // successfully send back the top 5 of each in json
+          res.json({
+            top_gainers: data.top_gainers.slice(0,5),
+            top_losers: data.top_losers.slice(0,5),
+          });
+        }
+    });
 });
