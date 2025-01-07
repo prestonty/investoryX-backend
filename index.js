@@ -32,9 +32,10 @@ app.get("/getTopNews", (req, res) => {
     // fetch the news
     finnhubClient.marketNews("general", {}, (error, data, response) => {
         if (error) {
+            console.error("Finnhub API Error:", error); // Log the actual error
             res.status(500).json({ error: "Failed to fetch news" });
         } else {
-            console.log("Successfully fetched the data");
+            console.log("Successfully fetched the top news");
             const firstFewArticles = data.slice(0, 3);
             res.json(firstFewArticles); // Send fetched data back to the client
         }
@@ -48,10 +49,38 @@ app.get("/getNews", (req, res) => {
         if (error) {
             res.status(500).json({ error: "Failed to fetch news" });
         } else {
-            console.log("Successfully fetched the data");
+            console.log("Successfully fetched the news");
+            // const articles = data.slice(0, 20);
             res.json(data); // Send fetched data back to the client
         }
     });
 });
 
-// Fetch latest news
+// Fetch Market Indices
+app.get("/getIndices", async (req, res) => {
+    const symbols = ["^GSPC", "^DJI", "^IXIC", "^NYA", "^XAX", "^BUK100P", "^RUT"];
+
+    try {
+        // Create an array of promises for each symbol
+        const promises = symbols.map(symbol => {
+            return new Promise((resolve, reject) => {
+                finnhubClient.quote(symbol, (error, data, response) => {
+                    if (error) {
+                        reject({ symbol, error });
+                    } else {
+                        resolve({ symbol, data });
+                    }
+                });
+            });
+        });
+
+        // Wait for all promises to resolve
+        const results = await Promise.all(promises);
+
+        // Send the results as a response
+        res.json(results);
+    } catch (error) {
+        console.error("Error fetching indices:", error);
+        res.status(500).json({ error: "Failed to fetch indices", details: error });
+    }
+});
