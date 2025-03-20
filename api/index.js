@@ -22,6 +22,8 @@ const api_key = finnhub.ApiClient.instance.authentications["api_key"];
 api_key.apiKey = process.env.FINNHUB_API_KEY;
 const finnhubClient = new finnhub.DefaultApi();
 
+const alpha_vantage_api_Key = process.env.ALPHA_VANTAGE_API_KEY;
+
 app.get("/", (req, res) => {
     res.send("Hello World!");
 });
@@ -134,7 +136,8 @@ app.get("/getCompanyData", (req, res) => {
 
 app.get("/getTopGainersLosers", (req, res) => {
     let url =
-        "https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=6K3LBRGQSVWFLNLK";
+        "https://www.alphavantage.co/query?function=TOP_GAINERS_LOSERS&apikey=" +
+        alpha_vantage_api_Key;
     request.get(
         {
             url: url,
