@@ -1,12 +1,20 @@
 import httpx
 from selectolax.parser import HTMLParser
 import json
-import asyncio
+import numpy as np
+import pandas as pd
+# import asyncio
+import yfinance as yf
+# from models.requests import RequestHistory
+from dataTypes.history import Period, Interval
+from utils import dataframeToJson
 
-
-def getStockPrice(tickerSym: str):
+def getStockPrice(ticker: str, etf:bool = False):
     try:
-        url = f"https://stockanalysis.com/stocks/{tickerSym}/"
+        if etf:
+            url = f"https://stockanalysis.com/etf/{ticker}/"
+        else:
+            url = f"https://stockanalysis.com/stocks/{ticker}/"
         response = httpx.get(url)
         html = response.text
         tree = HTMLParser(html)
@@ -22,7 +30,7 @@ def getStockPrice(tickerSym: str):
         priceChange = priceChanges[0] if priceChangesNode else "N/A"
         priceChangePercent = priceChanges[1][1:-1] if priceChangesNode else "N/A" # Use -2 if you want to remove the % symbol
 
-        tickerSymbol = tickerSym.upper()
+        tickerSymbol = ticker.upper()
 
         return {"companyName": companyName, "tickerSymbol": tickerSymbol, "stockPrice": stockPrice, "priceChange": priceChange, "priceChangePercent": priceChangePercent}
     
@@ -38,9 +46,22 @@ def getStockPrices(tickers):
 
     # I should call this every morning to fetch the stocks and store them in a database so it can be used throughout the day!!!
 
-def getStockOverview(tickerSym: str):
+def getStockHistory(ticker: str, period: Period, interval: Interval):
     try:
-        url = f"https://stockanalysis.com/stocks/{tickerSym}/"
+        stockData = yf.Ticker(ticker)
+        history = stockData.history(period=period, interval=interval)
+        formatHistory = dataframeToJson(history)
+
+        return {"data": formatHistory, "title": f"{ticker} with {period} period and {interval} interval"}
+    except httpx.RequestError as e:
+        raise RuntimeError(f"Request failed: {str(e)}")
+    except Exception as e:
+        raise RuntimeError(f"Unexpected error: {str(e)}")
+
+
+def getStockOverview(ticker: str):
+    try:
+        url = f"https://stockanalysis.com/stocks/{ticker}/"
         response = httpx.get(url)
         html = response.text
         tree = HTMLParser(html)

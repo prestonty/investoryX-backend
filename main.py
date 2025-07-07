@@ -1,9 +1,20 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import json
 
 from api.dataAccess.stockScraper import *
+from dataTypes.history import Period, Interval
+
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # or ["*"] for dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def read_root():
@@ -27,25 +38,25 @@ def getNews():
 # STOCK INFO FUNCTIONS ----------------------------------------------------------------------------------
 
 # Get stock info function - returns all the stock information from the page (heavy function)
-@app.get("/stocks/{tickerSym}")
-def get_StockPrice(tickerSym: str):
+@app.get("/stocks/{ticker}")
+def get_StockPrice(ticker: str):
     try:
-        return getStockPrice(tickerSym)
+        return getStockPrice(ticker)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # Get more advanced data from stock for display page
-@app.get("/stock-overview/{tickerSym}")
-def get_StockOverview(tickerSym: str):
+@app.get("/stock-overview/{ticker}")
+def get_StockOverview(ticker: str):
     try:
-        return getStockOverview(tickerSym)
+        return getStockOverview(ticker)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     
 # STOCK NEWS ---------------------------------------------------------------
 @app.get("/stock-news")
-def getStockNews():
+def get_StockNews():
     try:
         return getStockNews()
     except RuntimeError as e:
@@ -54,8 +65,18 @@ def getStockNews():
 # Fetch market indices and it sprices (Dows Jones, NasDaq, NYSE)
 @app.get("/major-etfs")
 def get_MajorETFs():
-    with open("data/etfs.json", "r") as f:
-        majorETFs = json.load(f)
+    # with open("data/etfs.json", "r") as f:
+    #     majorETFs = json.load(f)
+
+    # We can get away with reusing the getStockPrice function again
+    pass
+
+@app.get("/stock-history/{ticker}")
+def get_StockHistory(ticker: str, period: Period, interval: Interval):
+    try:
+        return getStockHistory(ticker, period, interval)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 
 # fetch the data for each etf
