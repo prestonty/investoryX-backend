@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
@@ -56,9 +56,9 @@ def get_StockOverview(ticker: str):
     
 # STOCK NEWS ---------------------------------------------------------------
 @app.get("/stock-news")
-def get_StockNews():
+def get_StockNews(max_articles: int = Query(default=20, description="Max number of articles")):
     try:
-        return getStockNews()
+        return getStockNews(max_articles)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 

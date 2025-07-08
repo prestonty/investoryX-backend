@@ -50,9 +50,20 @@ def getStockHistory(ticker: str, period: Period, interval: Interval):
     try:
         stockData = yf.Ticker(ticker)
         history = stockData.history(period=period, interval=interval)
+
+        history = history.reset_index() # Condex index (Date) into a column
+        history = history.rename(columns={
+            "Date": "date",
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume"
+        })
+
         formatHistory = dataframeToJson(history)
 
-        return {"data": formatHistory, "title": f"{ticker} with {period} period and {interval} interval"}
+        return {"data": formatHistory, "title": f"Stock Price for {ticker} with {period} period and {interval} interval"}
     except httpx.RequestError as e:
         raise RuntimeError(f"Request failed: {str(e)}")
     except Exception as e:
@@ -78,14 +89,13 @@ def getStockOverview(ticker: str):
     except Exception as e:
         raise RuntimeError(f"Unexpected error: {str(e)}")
 
-def getStockNews():
+def getStockNews(max_articles: int = 20):
     try:
         url = 'https://stockanalysis.com/news/all-stocks/'
         response = httpx.get(url)
         html = response.text
         tree = HTMLParser(html)
 
-        MAX_NEWS_RESULTS = 20
         currentNewsCount = 0
 
         newsNodes = tree.css("main div div div div.gap-4")
@@ -111,18 +121,18 @@ def getStockNews():
             source = details[1]
 
             newsResult = {
-                "title": title,
-                "img": img,
-                "articleLink": articleLink,
-                "stockTickers": stockTickers,
-                "postingTime": postingTime,
+                "headline": title,
+                "url": articleLink,
+                "image": img,
                 "source": source,
+                "datetime": postingTime,
+                "tickers": stockTickers,
             }
 
             newsResults.append(newsResult)
 
             currentNewsCount += 1
-            if currentNewsCount == MAX_NEWS_RESULTS:
+            if currentNewsCount == max_articles:
                 break
 
         return newsResults  # I should put a constraint on this

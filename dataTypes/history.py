@@ -20,7 +20,7 @@ class Period(StrEnum):
     DAY_5 = "5d"
     MONTH_1 = "1mo"
     MONTH_3 = "3mo"
-    MONTH_6 = "3mo"
+    MONTH_6 = "6mo"
     YEAR_1 = "1y"
     YEAR_2 = "2y"
     YEAR_5 = "5y"
