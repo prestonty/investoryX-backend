@@ -6,11 +6,19 @@ from api.dataAccess.stockScraper import *
 from dataTypes.history import Period, Interval
 
 
+# Create the tables if they do not exist - TODO: Use Alembic as a migration tool to do this in future
+from api.database.database import engine, Base
+import models.users
+import models.stocks
+import models.watchItems
+
+Base.metadata.create_all(bind=engine)
+
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # or ["*"] for dev
+    allow_origins=["http://localhost:3000"], # TODO: Change and put this in .env later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
