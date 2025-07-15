@@ -5,9 +5,9 @@ import numpy as np
 import pandas as pd
 # import asyncio
 import yfinance as yf
-# from models.requests import RequestHistory
-from dataTypes.history import Period, Interval
-from utils import dataframeToJson
+# from app.models.requests import RequestHistory
+from app.dataTypes.history import Period, Interval
+from app.utils import dataframeToJson
 
 def getStockPrice(ticker: str, etf:bool = False):
     try:

@@ -2,15 +2,16 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
-from api.dataAccess.stockScraper import *
-from dataTypes.history import Period, Interval
+from app.api.dataAccess.stockScraper import *
+from app.dataTypes.history import Period, Interval
 
 
 # Create the tables if they do not exist - TODO: Use Alembic as a migration tool to do this in future
-from api.database.database import engine, Base
-import models.users
-import models.stocks
-import models.watchItems
+from app.api.database.database import engine, Base
+import app.models.users
+import app.models.stocks
+import app.models.watchlist
+from app.api.routes import stocks, users, watchlist
 
 Base.metadata.create_all(bind=engine)
 
@@ -28,9 +29,14 @@ app.add_middleware(
 def read_root():
     return {"message": "Hello, FastAPI!"}
 
-@app.get("/getNews")
-def getNews():
-    pass
+# DATABASE ROUTES --------------------------------------------------------------------------------------
+app.include_router(stocks.router)
+app.include_router(users.router)
+app.include_router(watchlist.router)
+
+
+
+
 
 # SEARCH FUNCTIONS --------------------------------------------------------------------------------------
 
