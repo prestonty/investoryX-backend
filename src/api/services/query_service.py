@@ -3,7 +3,7 @@ from sqlalchemy import or_
 from typing import List
 from src.models.stocks import Stocks
 
-def query_search(filter_string: str, db: Session) -> List[Stocks]:
+def searchStocks(filter_string: str, db: Session) -> List[Stocks]:
     """
     Search for stocks where company_name contains the filter string OR ticker starts with the filter string.
     
@@ -31,7 +31,7 @@ def query_search(filter_string: str, db: Session) -> List[Stocks]:
         print(f"Error in query_search: {e}")
         return []
 
-def query_search_by_company_name(company_name: str, db: Session) -> List[Stocks]:
+def searchStocksByCompanyName(company_name: str, db: Session) -> List[Stocks]:
     """
     Search for stocks by company name (contains).
     
@@ -53,7 +53,7 @@ def query_search_by_company_name(company_name: str, db: Session) -> List[Stocks]
         print(f"Error in query_search_by_company_name: {e}")
         return []
 
-def query_search_by_ticker(ticker: str, db: Session) -> List[Stocks]:
+def searchStocksByTicker(ticker: str, db: Session) -> List[Stocks]:
     """
     Search for stocks by ticker (starts with).
     
@@ -69,7 +69,7 @@ def query_search_by_ticker(ticker: str, db: Session) -> List[Stocks]:
             Stocks.ticker.ilike(f"{ticker}%")
         ).all()
     
-    return stocks
+        return stocks
     
     except Exception as e:
         print(f"Error in query_search_by_ticker: {e}")

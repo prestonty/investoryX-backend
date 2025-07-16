@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
-from backend2.src.api.data_access.stock_data_provider import *
+from src.api.data_access.stock_data_provider import *
+from src.api.services.query_service import *
 from src.dataTypes.history import Period, Interval
 
 
@@ -40,6 +41,54 @@ app.include_router(watchlist.router)
 
 # SEARCH FUNCTIONS --------------------------------------------------------------------------------------
 
+@app.get("/search/ticker/{ticker}")
+def search_ticker(ticker: str):
+    """
+    Search for a stock by its ticker symbol.
+    
+    Args:
+        ticker (str): The ticker symbol to search for.
+    
+    Returns:
+        dict: Stock information if found, else raises HTTPException.
+    """
+    stocks = searchStocksByTicker(ticker)
+    if not stocks:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    return stocks
+
+@app.get("/search/company-name/{company_name}")
+def search_company_name(company_name: str):
+    """
+    Search for a stock by its ticker symbol.
+    
+    Args:
+        ticker (str): The ticker symbol to search for.
+    
+    Returns:
+        dict: Stock information if found, else raises HTTPException.
+    """
+    stocks = searchStocksByCompanyName(company_name)
+    if not stocks:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    return stocks
+
+@app.get("/search/stocks/{filter_string}")
+def searchStocks(filter_string: str):
+    """
+    Search for stocks either by company name or ticker symbol.
+    
+    Args:
+        filter_string (str): The filter string to search for.
+    
+    Returns:
+        dict: Stock information if found, else raises HTTPException.
+    """
+    stocks = searchStocks(filter_string)
+    if not stocks:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    return stocks
+
 # 1. search function via ticker symbol (E.g. appl for apple)
 # this function is boolean and will check if the SQL database contains this stock symbol
 # boolean return
@@ -54,6 +103,15 @@ app.include_router(watchlist.router)
 # Get stock info function - returns all the stock information from the page (heavy function)
 @app.get("/stocks/{ticker}")
 def get_StockPrice(ticker: str):
+    """
+    Get a stock's price and other details from its ticker symbol
+
+    Args:
+        ticker (str): The ticker symbol of the stock
+
+    Returns:
+        dict: Stock information if found, else raises HTTPException.
+    """
     try:
         return getStockPrice(ticker)
     except RuntimeError as e:
