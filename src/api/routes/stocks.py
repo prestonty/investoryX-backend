@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
 
-from app.api.database.database import get_db
-from app.models.stocks import Stocks
+from src.api.database.database import get_db
+from src.models.stocks import Stocks
+from src.api.services.query_service import query_search
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
@@ -46,3 +47,21 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
     if not stock:
         raise HTTPException(status_code=404, detail="Stock not found")
     return stock
+
+@router.get("/search/{filter_string}", response_model=List[StockResponse])
+def search_stocks(filter_string: str, db: Session = Depends(get_db)):
+    """
+    Search for stocks where company_name contains the filter string OR ticker starts with the filter string.
+    
+    Args:
+        filter_string (str): The search term to filter by
+        db (Session): Database session
+    
+    Returns:
+        List[StockResponse]: List of matching stocks
+    """
+    if not filter_string or len(filter_string.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Filter string cannot be empty")
+    
+    stocks = query_search(filter_string.strip(), db)
+    return stocks

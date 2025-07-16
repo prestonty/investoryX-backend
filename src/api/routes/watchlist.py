@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
 
-from app.api.database.database import get_db
-from app.models.watchlist import Watchlist
+from src.api.database.database import get_db
+from src.models.watchlist import Watchlist
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 

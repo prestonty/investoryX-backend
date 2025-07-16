@@ -4,8 +4,8 @@ from typing import List
 from pydantic import BaseModel
 from datetime import datetime
 
-from app.api.database.database import get_db
-from app.models.users import Users
+from src.api.database.database import get_db
+from src.models.users import Users
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 

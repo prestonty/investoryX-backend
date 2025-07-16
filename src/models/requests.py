@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-# from app.dataTypes.history import Period, Interval
+# from src.dataTypes.history import Period, Interval
 
 
 # class RequestHistory(BaseModel):

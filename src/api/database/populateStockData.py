@@ -2,8 +2,8 @@ import csv
 import requests
 import io
 from sqlalchemy.orm import Session
-from app.api.database.database import SessionLocal
-from app.models.stocks import Stocks
+from src.api.database.database import SessionLocal
+from src.models.stocks import Stocks
 
 def download_csv_from_alphavantage():
     """Download the CSV from Alpha Vantage API"""

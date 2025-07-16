@@ -1,0 +1,26 @@
+[
+    {
+        "ticker": "NVDA",
+        "name": "NVIDIA Corporation"
+    },
+    {
+        "ticker": "GOOGL",
+        "name": "Alphabet Inc Class A"
+    },
+    {
+        "ticker": "META",
+        "name": "Meta Platforms, Inc."
+    },
+    {
+        "ticker": "SHOP",
+        "name": "Shopify Inc."
+    },
+    {
+        "ticker": "MSFT",
+        "name": "Microsoft Corporation"
+    },
+    {
+        "ticker": "HOOD",
+        "name": "Robinhood Markets, Inc."
+    }
+]

@@ -1,4 +1,4 @@
-from app.api.database.database import Base
+from src.api.database.database import Base
 from sqlalchemy import Column, Integer, String, TIMESTAMP, Boolean, text
 
 
