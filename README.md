@@ -5,5 +5,5 @@ This is the backend repository for Investory - a beginner friendly stock analyti
 # Command to Start Backend Server
 
 ```console
-uvicorn main:app --reload
+uvicorn src.main:app --reload
 ```

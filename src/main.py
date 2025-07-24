@@ -41,57 +41,53 @@ app.include_router(watchlist.router)
 
 # SEARCH FUNCTIONS --------------------------------------------------------------------------------------
 
-@app.get("/search/ticker/{ticker}")
-def search_ticker(ticker: str):
-    """
-    Search for a stock by its ticker symbol.
+# @app.get("/search/ticker/{ticker}")
+# def search_ticker(ticker: str):
+#     """
+#     Search for a stock by its ticker symbol.
     
-    Args:
-        ticker (str): The ticker symbol to search for.
+#     Args:
+#         ticker (str): The ticker symbol to search for.
     
-    Returns:
-        dict: Stock information if found, else raises HTTPException.
-    """
-    stocks = searchStocksByTicker(ticker)
-    if not stocks:
-        raise HTTPException(status_code=404, detail="Stock not found")
-    return stocks
+#     Returns:
+#         dict: Stock information if found, else raises HTTPException.
+#     """
+#     stocks = searchStocksByTicker(ticker)
+#     if not stocks:
+#         raise HTTPException(status_code=404, detail="Stock not found")
+#     return stocks
 
-@app.get("/search/company-name/{company_name}")
-def search_company_name(company_name: str):
-    """
-    Search for a stock by its ticker symbol.
+# @app.get("/search/company-name/{company_name}")
+# def search_company_name(company_name: str):
+#     """
+#     Search for a stock by its ticker symbol.
     
-    Args:
-        ticker (str): The ticker symbol to search for.
+#     Args:
+#         ticker (str): The ticker symbol to search for.
     
-    Returns:
-        dict: Stock information if found, else raises HTTPException.
-    """
-    stocks = searchStocksByCompanyName(company_name)
-    if not stocks:
-        raise HTTPException(status_code=404, detail="Stock not found")
-    return stocks
+#     Returns:
+#         dict: Stock information if found, else raises HTTPException.
+#     """
+#     stocks = searchStocksByCompanyName(company_name)
+#     if not stocks:
+#         raise HTTPException(status_code=404, detail="Stock not found")
+#     return stocks
 
-@app.get("/search/stocks/{filter_string}")
-def searchStocks(filter_string: str):
-    """
-    Search for stocks either by company name or ticker symbol.
+# @app.get("/search/stocks/{filter_string}")
+# def search_stocks(filter_string: str):
+#     """
+#     Search for stocks either by company name or ticker symbol.
     
-    Args:
-        filter_string (str): The filter string to search for.
+#     Args:
+#         filter_string (str): The filter string to search for.
     
-    Returns:
-        dict: Stock information if found, else raises HTTPException.
-    """
-    stocks = searchStocks(filter_string)
-    if not stocks:
-        raise HTTPException(status_code=404, detail="Stock not found")
-    return stocks
-
-# 1. search function via ticker symbol (E.g. appl for apple)
-# this function is boolean and will check if the SQL database contains this stock symbol
-# boolean return
+#     Returns:
+#         dict: Stock information if found, else raises HTTPException.
+#     """
+#     stocks = searchStocks(filter_string)
+#     if not stocks:
+#         raise HTTPException(status_code=404, detail="Stock not found")
+#     return stocks
 
 # 2. search function via stock name (E.g. Apple Inc)
 # this function maps the stock name to the ticker so we can use the "/stocks" route to fetch the data
