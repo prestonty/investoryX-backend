@@ -9,13 +9,54 @@ import yfinance as yf
 from src.dataTypes.history import Period, Interval
 from src.utils import dataframeToJson
 
-def getStockPrice(ticker: str, etf:bool = False):
+def getStockPriceYFinance(ticker: str, etf: bool = False):
+    """
+    Get stock price data using yfinance library (more reliable)
+    """
     try:
-        if etf:
-            url = f"https://stockanalysis.com/etf/{ticker}/"
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Get current price and previous close
+        current_price = info.get('currentPrice', info.get('regularMarketPrice', 'N/A'))
+        previous_close = info.get('previousClose', 'N/A')
+        
+        # Calculate price change
+        if current_price != 'N/A' and previous_close != 'N/A':
+            price_change = current_price - previous_close
+            price_change_percent = (price_change / previous_close) * 100
+            price_change_str = f"{price_change:.2f}"
+            price_change_percent_str = f"{price_change_percent:.2f}"
         else:
-            url = f"https://stockanalysis.com/stocks/{ticker}/"
+            price_change_str = "N/A"
+            price_change_percent_str = "N/A"
+        
+        # Get company name
+        company_name = info.get('longName', info.get('shortName', 'N/A'))
+        
+        return {
+            "companyName": company_name,
+            "tickerSymbol": ticker.upper(),
+            "stockPrice": f"{current_price:.2f}" if current_price != 'N/A' else "N/A",
+            "priceChange": price_change_str,
+            "priceChangePercent": price_change_percent_str
+        }
+
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch stock data via yfinance: {str(e)}")
+
+
+def getStockPriceWebScraping(ticker: str, etf: bool = False):
+    """
+    Get stock price data using web scraping (original method)
+    """
+    try:
+        url = f"https://stockanalysis.com/etf/{ticker}/" if etf else f"https://stockanalysis.com/stocks/{ticker}/"
         response = httpx.get(url)
+
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to fetch stock page (status {response.status_code})")
+
         html = response.text
         tree = HTMLParser(html)
 
@@ -26,18 +67,42 @@ def getStockPrice(ticker: str, etf:bool = False):
         stockPrice = stockPriceNode.text() if stockPriceNode else "N/A"
 
         priceChangesNode = tree.css_first("main div.mx-auto div.flex-row div div.font-semibold")
-        priceChanges = priceChangesNode.text().split(" ")
-        priceChange = priceChanges[0] if priceChangesNode else "N/A"
-        priceChangePercent = priceChanges[1][1:-1] if priceChangesNode else "N/A" # Use -2 if you want to remove the % symbol
+        priceChanges = priceChangesNode.text().split(" ") if priceChangesNode else ["N/A", "(N/A%)"]
+        priceChange = priceChanges[0]
+        priceChangePercent = priceChanges[1][1:-1] if len(priceChanges) > 1 else "N/A"
 
         tickerSymbol = ticker.upper()
 
-        return {"companyName": companyName, "tickerSymbol": tickerSymbol, "stockPrice": stockPrice, "priceChange": priceChange, "priceChangePercent": priceChangePercent}
-    
+        return {
+            "companyName": companyName,
+            "tickerSymbol": tickerSymbol,
+            "stockPrice": stockPrice,
+            "priceChange": priceChange,
+            "priceChangePercent": priceChangePercent
+        }
+
     except httpx.RequestError as e:
         raise RuntimeError(f"Request failed: {str(e)}")
     except Exception as e:
         raise RuntimeError(f"Unexpected error: {str(e)}")
+
+
+def getStockPrice(ticker: str, etf: bool = False):
+    """
+    Get stock price data with fallback mechanism
+    Tries yfinance first, falls back to web scraping if needed
+    """
+    try:
+        # Try yfinance first (more reliable)
+        return getStockPriceYFinance(ticker, etf)
+    except Exception as e:
+        print(f"yfinance failed for {ticker}: {str(e)}")
+        try:
+            # Fallback to web scraping
+            return getStockPriceWebScraping(ticker, etf)
+        except Exception as web_error:
+            raise RuntimeError(f"Both yfinance and web scraping failed for {ticker}. yfinance error: {str(e)}, web scraping error: {str(web_error)}")
+
 
 def getStockPrices(tickers):
     # Reduce the amount of calls, and add an artificial delay to respect the limit rate
@@ -70,24 +135,131 @@ def getStockHistory(ticker: str, period: Period, interval: Interval):
         raise RuntimeError(f"Unexpected error: {str(e)}")
 
 
-def getStockOverview(ticker: str):
+def getStockOverviewYFinance(ticker: str):
+    """
+    Get stock overview data using yfinance library
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Map yfinance data to our expected format
+        overview = {}
+        
+        # Helper function to format numbers safely
+        def format_number(value, prefix="", suffix="", decimal_places=2):
+            if value is None or value == 'N/A':
+                return "N/A"
+            try:
+                if isinstance(value, (int, float)):
+                    if decimal_places == 0:
+                        return f"{prefix}{value:,}{suffix}"
+                    else:
+                        return f"{prefix}{value:,.{decimal_places}f}{suffix}"
+                return str(value)
+            except:
+                return "N/A"
+        
+        overview["Market Cap"] = format_number(info.get('marketCap'), "$")
+        overview["Revenue (ttm)"] = format_number(info.get('totalRevenue'), "$")
+        overview["Net Income (ttm)"] = format_number(info.get('netIncomeToCommon'), "$")
+        overview["Shares Out"] = format_number(info.get('sharesOutstanding'), "", "", 0)
+        overview["ESP (ttm)"] = format_number(info.get('trailingEps'), "$")
+        overview["PE Ratio"] = format_number(info.get('trailingPE'))
+        overview["Foward PE"] = format_number(info.get('forwardPE'))
+        overview["Dividend"] = format_number(info.get('dividendRate'), "$")
+        overview["Ex-Dividend Date"] = str(info.get('exDividendDate', 'N/A'))
+        overview["Volume"] = format_number(info.get('volume'), "", "", 0)
+        overview["Open"] = format_number(info.get('open'), "$")
+        overview["Previous Close"] = format_number(info.get('previousClose'), "$")
+        
+        # Handle ranges
+        day_low = info.get('dayLow')
+        day_high = info.get('dayHigh')
+        if day_low and day_high:
+            overview["Day's Range"] = f"${day_low:.2f} - ${day_high:.2f}"
+        else:
+            overview["Day's Range"] = "N/A"
+            
+        week_low = info.get('fiftyTwoWeekLow')
+        week_high = info.get('fiftyTwoWeekHigh')
+        if week_low and week_high:
+            overview["52-Week Range"] = f"${week_low:.2f} - ${week_high:.2f}"
+        else:
+            overview["52-Week Range"] = "N/A"
+            
+        overview["Beta"] = format_number(info.get('beta'))
+        overview["Analysts"] = format_number(info.get('numberOfAnalystOpinions'), "", "", 0)
+        overview["Price Target"] = format_number(info.get('targetMeanPrice'), "$")
+        overview["Earnings Date"] = str(info.get('earningsTimestamp', 'N/A'))
+        
+        return overview
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch stock overview data via yfinance: {str(e)}")
+
+def getStockOverviewWebScraping(ticker: str):
+    """
+    Get stock overview data using web scraping (original method)
+    """
     try:
         url = f"https://stockanalysis.com/stocks/{ticker}/"
         response = httpx.get(url)
+        
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to fetch stock overview page (status {response.status_code})")
+            
         html = response.text
         tree = HTMLParser(html)
         
         overview = ["Market Cap", "Revenue (ttm)", "Net Income (ttm)", "Shares Out", "ESP (ttm)", "PE Ratio", "Foward PE", "Dividend", "Ex-Dividend Date", "Volume", "Open", "Previous Close", "Day's Range", "52-Week Range", "Beta", "Analysts", "Price Target", "Earnings Date"]
 
         overviewNode = tree.css("td.font-semibold")
-        for i in range(len(overviewNode)):
-            overviewNode[i] = overviewNode[i].text().strip() # modify td
-        result = dict(zip(overview, overviewNode))
+        
+        # Debug: Print the number of nodes found
+        print(f"Found {len(overviewNode)} overview nodes for {ticker}")
+        
+        # Ensure we have enough nodes
+        if len(overviewNode) < len(overview):
+            print(f"Warning: Expected {len(overview)} nodes but found {len(overviewNode)}")
+            # Pad with empty strings if we don't have enough nodes
+            while len(overviewNode) < len(overview):
+                overviewNode.append("N/A")
+        
+        # Extract text from nodes
+        overviewValues = []
+        for i in range(len(overview)):
+            if i < len(overviewNode):
+                value = overviewNode[i].text().strip()
+                overviewValues.append(value if value else "N/A")
+            else:
+                overviewValues.append("N/A")
+        
+        result = dict(zip(overview, overviewValues))
+        
+        # Debug: Print the result
+        print(f"Overview data for {ticker}: {result}")
+        
         return result
     except httpx.RequestError as e:
         raise RuntimeError(f"Request failed: {str(e)}")
     except Exception as e:
         raise RuntimeError(f"Unexpected error: {str(e)}")
+
+def getStockOverview(ticker: str):
+    """
+    Get stock overview data with fallback mechanism
+    Tries yfinance first, falls back to web scraping if needed
+    """
+    try:
+        # Try yfinance first (more reliable)
+        return getStockOverviewYFinance(ticker)
+    except Exception as e:
+        print(f"yfinance overview failed for {ticker}: {str(e)}")
+        try:
+            # Fallback to web scraping
+            return getStockOverviewWebScraping(ticker)
+        except Exception as web_error:
+            raise RuntimeError(f"Both yfinance and web scraping failed for {ticker} overview. yfinance error: {str(e)}, web scraping error: {str(web_error)}")
 
 def getStockNews(max_articles: int = 20):
     try:

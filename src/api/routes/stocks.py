@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
-from sqlalchemy import or_
+from sqlalchemy import case, or_
 
 from src.api.database.database import get_db
 from src.models.stocks import Stocks
@@ -62,6 +62,8 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Stock not found")
     return stock
 
+# SEARCH FUNCTIONS --------------------------------------------------------------------------------------
+
 @router.get("/search/{filter_string}", response_model=List[StockSearchItem])
 def search_stocks(filter_string: str, db: Session = Depends(get_db)):
     """
@@ -77,10 +79,19 @@ def search_stocks(filter_string: str, db: Session = Depends(get_db)):
     LIMIT = 200 # Max number if items returned
     stocks = db.query(Stocks).filter(
         or_(
-        Stocks.ticker.ilike(f"%{filter_string}%"),
-        Stocks.company_name.ilike(f"%{filter_string}%")
-    )
+            Stocks.ticker.ilike(f"%{filter_string}%"),
+            Stocks.company_name.ilike(f"%{filter_string}%")
+        )
+    ).order_by(
+        # Prioritize ticker matches over company name matches
+        case(
+            (Stocks.ticker == filter_string.lower(), 0),
+            (Stocks.ticker.ilike(f"{filter_string}%"), 1),
+            (Stocks.company_name.ilike(f"{filter_string}%"), 2),
+            else_=3
+        )
     ).limit(LIMIT).all() # case insensitive comparison
+    
     if not stocks:
         raise HTTPException(status_code=404, detail="Stock not found")
     return [

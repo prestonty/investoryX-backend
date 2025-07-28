@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-import json
+from typing import Annotated
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
 
 from src.api.data_access.stock_data_provider import *
 from src.api.services.query_service import *
@@ -14,9 +16,9 @@ import src.models.stocks
 import src.models.watchlist
 from src.api.routes import stocks, users, watchlist
 
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -100,7 +102,7 @@ app.include_router(watchlist.router)
 @app.get("/stocks/{ticker}")
 def get_StockPrice(ticker: str):
     """
-    Get a stock's price and other details from its ticker symbol
+    Get basic information about a stock - company name, price, price change from its ticker symbol
 
     Args:
         ticker (str): The ticker symbol of the stock
@@ -117,6 +119,15 @@ def get_StockPrice(ticker: str):
 # Get more advanced data from stock for display page
 @app.get("/stock-overview/{ticker}")
 def get_StockOverview(ticker: str):
+    """
+    Get advanced information about a stock from its ticker symbol
+
+    Args:
+        ticker (str): The ticker symbol of the stock
+
+    Returns:
+        dict: Stock information if found, else raises HTTPException.
+    """
     try:
         return getStockOverview(ticker)
     except RuntimeError as e:
@@ -146,6 +157,7 @@ def get_StockHistory(ticker: str, period: Period, interval: Interval):
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+
 
 # fetch the data for each etf
 # Fetch from this list
