@@ -1,12 +1,14 @@
-from fastapi import FastAPI, HTTPException, Query
+import os
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Annotated
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-import secrets
-
+from dotenv import load_dotenv
 from src.api.data_access.stock_data_provider import *
 from src.api.services.query_service import *
 from src.dataTypes.history import Period, Interval
+
+# Load environment variables
+load_dotenv()
 
 
 # Create the tables if they do not exist - TODO: Use Alembic as a migration tool to do this in future
@@ -14,15 +16,14 @@ from src.api.database.database import engine, Base
 import src.models.users
 import src.models.stocks
 import src.models.watchlist
-from src.api.routes import stocks, users, watchlist
+from src.api.routes import stocks, users, watchlist, auth
 
 
 app = FastAPI()
 
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"], # TODO: Change and put this in .env later
+    allow_origins=[os.getenv("CORS_ORIGINS", "http://localhost:3000")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,6 +37,7 @@ def read_root():
 app.include_router(stocks.router)
 app.include_router(users.router)
 app.include_router(watchlist.router)
+app.include_router(auth.router)
 
 
 
@@ -97,6 +99,9 @@ app.include_router(watchlist.router)
 # string return (ticker symbol)
 
 # STOCK INFO FUNCTIONS ----------------------------------------------------------------------------------
+
+# https://fastapi.tiangolo.com/tutorial/security/first-steps/#use-it
+# Add OAuth to your methods so user can use the only when logged in (to some, e.g. watchlist)
 
 # Get stock info function - returns all the stock information from the page (heavy function)
 @app.get("/stocks/{ticker}")
