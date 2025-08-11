@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 from src.dataTypes.history import Period, Interval
-from src.utils import dataframeToJson, with_backoff, RateLimiter
+from src.utils import dataframeToJson, with_backoff, round_2_decimals, RateLimiter
 
 # Rate limiting
 per_batch_limiter  = RateLimiter(20, 60.0)
@@ -365,9 +365,9 @@ def getDefaultIndexes(default_etfs):
             for etf in category["etfs"]:
                 p = prices.get(etf["ticker"])
                 if p:
-                    etf["price"] = p["stockPrice"]
-                    etf["priceChange"] = p["priceChange"]
-                    etf["priceChangePercent"] = p["priceChangePercent"]
+                    etf["price"] = round_2_decimals(p["stockPrice"])
+                    etf["priceChange"] = round_2_decimals(p["priceChange"])
+                    etf["priceChangePercent"] = round_2_decimals(p["priceChangePercent"])
 
 
         return default_etfs
