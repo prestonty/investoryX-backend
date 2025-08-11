@@ -1,13 +1,15 @@
 import httpx
 from selectolax.parser import HTMLParser
-import json
+import time
 import numpy as np
 import pandas as pd
-# import asyncio
 import yfinance as yf
-# from src.models.requests import RequestHistory
 from src.dataTypes.history import Period, Interval
-from src.utils import dataframeToJson
+from src.utils import dataframeToJson, with_backoff, RateLimiter
+
+# Rate limiting
+per_batch_limiter  = RateLimiter(20, 60.0)
+per_ticker_limiter = RateLimiter(60, 60.0)
 
 def getStockPriceYFinance(ticker: str, etf: bool = False):
     """
@@ -104,10 +106,46 @@ def getStockPrice(ticker: str, etf: bool = False):
             raise RuntimeError(f"Both yfinance and web scraping failed for {ticker}. yfinance error: {str(e)}, web scraping error: {str(web_error)}")
 
 
-def getStockPrices(tickers):
-    # Reduce the amount of calls, and add an artificial delay to respect the limit rate
-    # Maximum fetch 30 stocks at once!!!
-    pass
+def getStockPricesBatch(tickers):
+    """
+    Fetches stock prices for multiple tickers using yfinance.
+    Respects Yahoo Finance's limit of ~30 tickers per batch.
+    Add throttling to avoid rate limits
+    """
+    results = {}
+    # Yahoo Finance handles up to ~30 tickers at once
+    for i in range(0, len(tickers), 30):
+        batch = tickers[i:i + 30]
+        tickers_str = " ".join(batch)
+
+        # Wait up to 5s for a batch slot; if not, back off a bit
+        if not per_batch_limiter.wait(timeout=5):
+            time.sleep(1)  # or raise/return partial/etc.
+        data = with_backoff(lambda: yf.Tickers(tickers_str))
+
+        for t in batch:
+            # Wait up to 2s per ticker; if not available, skip and try next
+            if not per_ticker_limiter.wait(timeout=2):
+                results[t] = {"error": "rate limited, try later"}
+                continue
+
+            def fetch_one():
+                info = data.tickers[t].fast_info
+                last_price = info.last_price
+                prev_close = info.previous_close
+                pct = ((last_price - prev_close) / prev_close) * 100 if prev_close else None
+                return {
+                    "stockPrice": last_price,
+                    "priceChange": None if prev_close is None else (last_price - prev_close),
+                    "priceChangePercent": pct,
+                }
+
+            try:
+                results[t] = with_backoff(fetch_one)
+            except Exception as e:
+                results[t] = {"error": str(e)}
+
+    return results
 
     # I should call this every morning to fetch the stocks and store them in a database so it can be used throughout the day!!!
 
@@ -313,3 +351,25 @@ def getStockNews(max_articles: int = 20):
     except Exception as e:
         raise RuntimeError(f"Unexpected error: {str(e)}")
 
+def getDefaultIndexes(default_etfs):
+    """
+    Get default market index etfs from a predefined list
+    """
+    try:
+        if not default_etfs:
+            raise ValueError("No default ETFs provided")
+        tickers = {etf["ticker"] for cat in default_etfs for etf in cat["etfs"]}
+        prices = getStockPricesBatch(list(tickers))
+
+        for category in default_etfs:
+            for etf in category["etfs"]:
+                p = prices.get(etf["ticker"])
+                if p:
+                    etf["price"] = p["stockPrice"]
+                    etf["priceChange"] = p["priceChange"]
+                    etf["priceChangePercent"] = p["priceChangePercent"]
+
+
+        return default_etfs
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch default ETFs: {str(e)}")

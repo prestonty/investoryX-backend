@@ -68,24 +68,24 @@ def parse_csv_and_insert_stocks(csv_content):
         # Final commit for remaining stocks
         db.commit()
         
-        print(f"✅ Successfully inserted {inserted_count} stocks")
-        print(f"⏭️  Skipped {skipped_count} stocks (missing data or duplicates)")
+        print(f"Successfully inserted {inserted_count} stocks")
+        print(f"Skipped {skipped_count} stocks (missing data or duplicates)")
         
     except Exception as e:
-        print(f"❌ Error processing CSV: {e}")
+        print(f"Error processing CSV: {e}")
         db.rollback()
     finally:
         db.close()
 
 def main():
-    print("🔄 Downloading stock data from Alpha Vantage...")
+    print("Downloading stock data from Alpha Vantage...")
     csv_content = download_csv_from_alphavantage()
     
     if csv_content:
-        print("📊 Parsing CSV and inserting stocks into database...")
+        print("Parsing CSV and inserting stocks into database...")
         parse_csv_and_insert_stocks(csv_content)
     else:
-        print("❌ Failed to download CSV data")
+        print("Failed to download CSV data")
 
 if __name__ == "__main__":
     main()

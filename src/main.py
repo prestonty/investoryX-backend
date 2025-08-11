@@ -3,9 +3,11 @@ from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Annotated
 from dotenv import load_dotenv
-from src.api.data_access.stock_data_provider import *
-from src.api.services.query_service import *
+from src.api.services.stock_data_provider import *
 from src.dataTypes.history import Period, Interval
+import json
+from pathlib import Path
+
 
 # Load environment variables
 load_dotenv()
@@ -40,63 +42,9 @@ app.include_router(watchlist.router)
 app.include_router(auth.router)
 
 
-
-
-
-# SEARCH FUNCTIONS --------------------------------------------------------------------------------------
-
-# @app.get("/search/ticker/{ticker}")
-# def search_ticker(ticker: str):
-#     """
-#     Search for a stock by its ticker symbol.
-    
-#     Args:
-#         ticker (str): The ticker symbol to search for.
-    
-#     Returns:
-#         dict: Stock information if found, else raises HTTPException.
-#     """
-#     stocks = searchStocksByTicker(ticker)
-#     if not stocks:
-#         raise HTTPException(status_code=404, detail="Stock not found")
-#     return stocks
-
-# @app.get("/search/company-name/{company_name}")
-# def search_company_name(company_name: str):
-#     """
-#     Search for a stock by its ticker symbol.
-    
-#     Args:
-#         ticker (str): The ticker symbol to search for.
-    
-#     Returns:
-#         dict: Stock information if found, else raises HTTPException.
-#     """
-#     stocks = searchStocksByCompanyName(company_name)
-#     if not stocks:
-#         raise HTTPException(status_code=404, detail="Stock not found")
-#     return stocks
-
-# @app.get("/search/stocks/{filter_string}")
-# def search_stocks(filter_string: str):
-#     """
-#     Search for stocks either by company name or ticker symbol.
-    
-#     Args:
-#         filter_string (str): The filter string to search for.
-    
-#     Returns:
-#         dict: Stock information if found, else raises HTTPException.
-#     """
-#     stocks = searchStocks(filter_string)
-#     if not stocks:
-#         raise HTTPException(status_code=404, detail="Stock not found")
-#     return stocks
-
-# 2. search function via stock name (E.g. Apple Inc)
-# this function maps the stock name to the ticker so we can use the "/stocks" route to fetch the data
-# map the stock name to the ticker in the database
-# string return (ticker symbol)
+# File Paths --------------------------------------------------------------------------------------
+NAME = "market_index_ETFs_2.json"
+ETF_PATH = Path(__file__).resolve().parent / "stocklist" / NAME
 
 # STOCK INFO FUNCTIONS ----------------------------------------------------------------------------------
 
@@ -163,6 +111,30 @@ def get_StockHistory(ticker: str, period: Period, interval: Interval):
         raise HTTPException(status_code=500, detail=str(e))
     
 
+# ETFS -----------------------------------------------------------------------------------
+@app.get("/get-default-indexes")
+def get_DefaultIndexes():
+    """
+    Get a list of default market index etfs to display on the homepage.
+    
+    Returns:
+        dict: A list of default market indexes.
+    """
+
+    try:
+        with ETF_PATH.open("r", encoding="utf-8") as f:
+            default_etfs = json.load(f)
+    except FileNotFoundError:
+        # In dev, exposing the resolved path helps; in prod, log it instead.
+        raise HTTPException(404, detail=f"Default ETF file not found at {ETF_PATH}")
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, detail=f"Invalid JSON in {ETF_PATH}: {e}")
+
+
+    try:
+        return getDefaultIndexes(default_etfs)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # fetch the data for each etf
 # Fetch from this list
