@@ -155,7 +155,6 @@ def send_WelcomeEmail(email: str, first_name: str, dashboard_url: str):
 
 
 
-
 # fetch the data for each etf
 # Fetch from this list
 

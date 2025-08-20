@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
@@ -8,11 +8,14 @@ from src.api.database.database import get_db
 from src.api.auth.auth import (
     authenticate_user,
     create_access_token,
+    create_refresh_token,
     get_password_hash,
     get_current_active_user,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    REFRESH_TOKEN_EXPIRE_DAYS,
     create_email_verification_token,
     verify_email_token,
+    refresh_access_token,
 )
 from src.models.users import Users
 
@@ -39,9 +42,10 @@ class UserResponse(BaseModel):
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None
 ):
-    """Login endpoint that returns a JWT token."""
+    """Login endpoint that returns a JWT token and sets cookies."""
     # Check if user exists first
     from src.api.auth.auth import get_user_by_email
     existing_user = get_user_by_email(db, form_data.username)
@@ -68,12 +72,47 @@ async def login_for_access_token(
             detail="Account not verified. Please check your email to verify your account.",
         )
     
+    # Create both access and refresh tokens
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": str(user.UserId)}, expires_delta=access_token_expires
     )
     
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    refresh_token = create_refresh_token(
+        data={"sub": str(user.UserId)}, expires_delta=refresh_token_expires
+    )
+    
+    # Create response with tokens
+    response = {"access_token": access_token, "token_type": "bearer"}
+    
+    # Set cookies in the response
+    from fastapi.responses import JSONResponse
+    json_response = JSONResponse(content=response)
+    
+    # Set access token cookie (httpOnly=False so frontend can read it)
+    json_response.set_cookie(
+        key="access_token",
+        value=access_token,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # Convert to seconds
+        httponly=False,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        path="/"
+    )
+    
+    # Set refresh token cookie (httpOnly=True for security)
+    json_response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,  # Convert to seconds
+        httponly=True,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        path="/"
+    )
+    
+    return json_response
 
 @router.post("/register", response_model=UserResponse)
 async def register_user(user: UserCreate, db: Session = Depends(get_db)):
@@ -136,3 +175,45 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Email verified successfully"}
+
+@router.post("/refresh")
+def refresh_token_endpoint(request: Request, db: Session = Depends(get_db)):
+    """Endpoint to refresh access token using a refresh token from cookies."""
+    result = refresh_access_token(request, db)
+    
+    # Set the new access token as a cookie
+    from fastapi.responses import JSONResponse
+    response = JSONResponse(content=result)
+    
+    response.set_cookie(
+        key="access_token",
+        value=result["access_token"],
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # Convert to seconds
+        httponly=False,
+        secure=False,  # Set to True in production with HTTPS
+        samesite="lax",
+        path="/"
+    )
+    
+    return response
+
+@router.post("/logout")
+async def logout():
+    """Logout endpoint that clears authentication cookies."""
+    from fastapi.responses import JSONResponse
+    
+    response = JSONResponse(content={"message": "Logged out successfully"})
+    
+    # Clear access token cookie
+    response.delete_cookie(
+        key="access_token",
+        path="/"
+    )
+    
+    # Clear refresh token cookie
+    response.delete_cookie(
+        key="refresh_token",
+        path="/"
+    )
+    
+    return response
