@@ -1,7 +1,7 @@
 from pydantic import BaseModel
-# from src.dataTypes.history import Period, Interval
 
 
-# class RequestHistory(BaseModel):
-#     periodRange: Period
-#     intervalRange: Interval
+class EmailRequest(BaseModel):
+    email: str
+    first_name: str
+    verification_url: str

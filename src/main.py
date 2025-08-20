@@ -3,29 +3,30 @@ from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Annotated
 from dotenv import load_dotenv
-from src.api.services.stock_data_provider import *
-from src.dataTypes.history import Period, Interval
 import json
 from pathlib import Path
 
+from src.dataTypes.history import Period, Interval
+
+# Create the tables if they do not exist
+from src.api.database.database import engine, Base
+
+
+from src.models.requests import EmailRequest
+from src.api.routes import stocks, users, watchlist, auth
+
+# Services
+from src.api.services.stock_data_service import *
+from src.api.services.email_service import *
 
 # Load environment variables
 load_dotenv()
-
-
-# Create the tables if they do not exist - TODO: Use Alembic as a migration tool to do this in future
-from src.api.database.database import engine, Base
-import src.models.users
-import src.models.stocks
-import src.models.watchlist
-from src.api.routes import stocks, users, watchlist, auth
-
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("CORS_ORIGINS", "http://localhost:3000")],
+    allow_origins=[os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -135,6 +136,25 @@ def get_DefaultIndexes():
         return getDefaultIndexes(default_etfs)
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# EMAIL SERVICE -----------------------------------------------------------------------------------
+@app.post("/send-sign-up-email")
+def send_SignUpEmail(request: EmailRequest):
+    try:
+        return sendSignUpEmail(request.email, request.first_name, request.verification_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/send-welcome-email")
+def send_WelcomeEmail(email: str, first_name: str, dashboard_url: str):
+    try:
+        return sendWelcomeEmail(email, first_name, dashboard_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
 
 # fetch the data for each etf
 # Fetch from this list

@@ -1,6 +1,6 @@
-# Investory Backend
+# InvestoryX Backend
 
-This is the backend repository for Investory - a beginner friendly stock analytics platform
+This is the backend repository for InvestoryX - a beginner friendly stock analytics platform
 
 # Command to Start Backend Server
 

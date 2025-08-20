@@ -24,6 +24,7 @@ if SECRET_KEY is None:
 
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+EMAIL_TOKEN_EXPIRE_MINUTES = int(os.getenv("EMAIL_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours by default
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
@@ -51,6 +52,8 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[Users]
         return None
     if not verify_password(password, user.password):
         return None
+    if not user.is_active:
+        return None  # Prevent inactive users from logging in
     return user
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -61,12 +64,30 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+def create_email_verification_token(user_id: int, expires_minutes: Optional[int] = None) -> str:
+    """Create a JWT token specifically for email verification."""
+    minutes = expires_minutes if expires_minutes is not None else EMAIL_TOKEN_EXPIRE_MINUTES
+    expire = timedelta(minutes=minutes)
+    return create_access_token({"sub": str(user_id), "scope": "verify_email"}, expire)
+
 def verify_token(token: str) -> Optional[dict]:
     """Verify and decode a JWT token."""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
     except JWTError:
+        return None
+
+def verify_email_token(token: str) -> Optional[int]:
+    """Verify an email verification token and return the user_id if valid."""
+    payload = verify_token(token)
+    if payload is None:
+        return None
+    if payload.get("scope") != "verify_email":
+        return None
+    try:
+        return int(payload.get("sub")) if payload.get("sub") is not None else None
+    except (TypeError, ValueError):
         return None
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Users:

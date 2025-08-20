@@ -6,11 +6,13 @@ from pydantic import BaseModel
 
 from src.api.database.database import get_db
 from src.api.auth.auth import (
-    authenticate_user, 
-    create_access_token, 
-    get_password_hash, 
+    authenticate_user,
+    create_access_token,
+    get_password_hash,
     get_current_active_user,
-    ACCESS_TOKEN_EXPIRE_MINUTES
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    create_email_verification_token,
+    verify_email_token,
 )
 from src.models.users import Users
 
@@ -59,6 +61,12 @@ async def login_for_access_token(
             detail="Incorrect password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Ensure user is active (email verified)
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account not verified. Please check your email to verify your account.",
+        )
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -84,16 +92,47 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         Name=user.Name,
         email=user.email,
         password=hashed_password,
-        is_active=True  # Set to True by default, you can change this if you want email verification
+        is_active=False  # Set to False until email verification
     )
     
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    
+
+    # Create email verification token and send email
+    verification_token = create_email_verification_token(db_user.UserId)
+
+    try:
+        from src.api.services.email_service import send_verification_email
+        send_verification_email(db_user.email, db_user.Name, verification_token)
+    except Exception as e:
+        # If email fails, we still created the account but inform the client
+        # Client can trigger resend verification later
+        pass
+
     return db_user
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: Users = Depends(get_current_active_user)):
     """Get current user information."""
     return current_user 
+
+@router.get("/verify-email")
+async def verify_email(token: str, db: Session = Depends(get_db)):
+    """Endpoint to verify a user's email using a token."""
+    user_id = verify_email_token(token)
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+
+    user = db.query(Users).filter(Users.UserId == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    if user.is_active:
+        return {"message": "Account already verified"}
+
+    user.is_active = True
+    db.add(user)
+    db.commit()
+
+    return {"message": "Email verified successfully"}
