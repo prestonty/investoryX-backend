@@ -3,6 +3,10 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from src.api.auth.auth import get_user_by_email
+from src.api.services.email_service import send_verification_email
+
 
 from src.api.database.database import get_db
 from src.api.auth.auth import (
@@ -47,7 +51,6 @@ async def login_for_access_token(
 ):
     """Login endpoint that returns a JWT token and sets cookies."""
     # Check if user exists first
-    from src.api.auth.auth import get_user_by_email
     existing_user = get_user_by_email(db, form_data.username)
     
     if not existing_user:
@@ -87,7 +90,6 @@ async def login_for_access_token(
     response = {"access_token": access_token, "token_type": "bearer"}
     
     # Set cookies in the response
-    from fastapi.responses import JSONResponse
     json_response = JSONResponse(content=response)
     
     # Set access token cookie (httpOnly=False so frontend can read it)
@@ -142,7 +144,6 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     verification_token = create_email_verification_token(db_user.UserId)
 
     try:
-        from src.api.services.email_service import send_verification_email
         send_verification_email(db_user.email, db_user.Name, verification_token)
     except Exception as e:
         # If email fails, we still created the account but inform the client
@@ -182,7 +183,6 @@ def refresh_token_endpoint(request: Request, db: Session = Depends(get_db)):
     result = refresh_access_token(request, db)
     
     # Set the new access token as a cookie
-    from fastapi.responses import JSONResponse
     response = JSONResponse(content=result)
     
     response.set_cookie(
@@ -199,9 +199,7 @@ def refresh_token_endpoint(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/logout")
 async def logout():
-    """Logout endpoint that clears authentication cookies."""
-    from fastapi.responses import JSONResponse
-    
+    """Logout endpoint that clears authentication cookies."""    
     response = JSONResponse(content={"message": "Logged out successfully"})
     
     # Clear access token cookie

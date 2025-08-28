@@ -16,6 +16,7 @@ def sendSignUpEmail(email: str, first_name: str, verification_url: str, link_ttl
     html_content = load_template("sign_up")
     
     # Replace template variables
+    html_content = html_content.replace("{first_name}", first_name)
     html_content = html_content.replace("{email}", email)
     html_content = html_content.replace("{verification_url}", verification_url)
     html_content = html_content.replace("{link_ttl_minutes}", str(link_ttl_minutes))
