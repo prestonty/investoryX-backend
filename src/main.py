@@ -22,11 +22,17 @@ from src.api.services.email_service import *
 # Load environment variables
 load_dotenv()
 
+origins = [
+    "https://investory-six.vercel.app",
+    os.getenv("FRONTEND_BASE_URL"),
+    "https://www.investoryx.ca",
+]
+
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
