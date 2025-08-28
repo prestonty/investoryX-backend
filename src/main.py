@@ -5,6 +5,9 @@ from typing import Annotated
 from dotenv import load_dotenv
 import json
 from pathlib import Path
+import asyncio
+from alembic.config import Config
+from alembic import command
 
 from src.dataTypes.history import Period, Interval
 
@@ -52,6 +55,13 @@ app.include_router(auth.router)
 # File Paths --------------------------------------------------------------------------------------
 NAME = "market_index_ETFs_2.json"
 ETF_PATH = Path(__file__).resolve().parent / "stocklist" / NAME
+
+# DB Start up after deploying
+@app.on_event("startup")
+async def run_migrations():
+    alembic_cfg = Config("alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+
 
 # STOCK INFO FUNCTIONS ----------------------------------------------------------------------------------
 
