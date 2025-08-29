@@ -5,7 +5,7 @@ from datetime import timedelta
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 from src.api.auth.auth import get_user_by_email
-from src.api.services.email_service import send_verification_email
+from src.api.services.email_service import sendSignUpEmail
 
 
 from src.api.database.database import get_db
@@ -144,7 +144,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     verification_token = create_email_verification_token(db_user.UserId)
 
     try:
-        send_verification_email(db_user.email, db_user.Name, verification_token)
+        sendSignUpEmail(db_user.email, db_user.Name, verification_token)
     except Exception as e:
         # If email fails, we still created the account but inform the client
         # Client can trigger resend verification later
