@@ -43,6 +43,9 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class ResendVerificationRequest(BaseModel):
+    email: str
+
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
@@ -68,11 +71,20 @@ async def login_for_access_token(
             detail="Incorrect password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
     # Ensure user is active (email verified)
     if not user.is_active:
+        # Automatically resend verification email
+        try:
+            verification_token = create_email_verification_token(user.UserId)
+            sendSignUpEmail(user.email, user.Name, verification_token)
+        except Exception as e:
+            # Log the error but don't fail the request
+            print(f"Failed to resend verification email: {e}")
+        
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account not verified. Please check your email to verify your account.",
+            detail="Email not verified. A new verification email has been sent to your inbox.",
         )
     
     # Create both access and refresh tokens
@@ -151,6 +163,32 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         pass
 
     return db_user
+
+@router.post("/resend-verification")
+async def resend_verification_email(request: ResendVerificationRequest, db: Session = Depends(get_db)):
+    """Resend verification email for a user."""
+    user = get_user_by_email(db, request.email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found with this email address"
+        )
+    
+    if user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Account is already verified"
+        )
+    
+    try:
+        verification_token = create_email_verification_token(user.UserId)
+        sendSignUpEmail(user.email, user.Name, verification_token)
+        return {"message": "Verification email sent successfully"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send verification email"
+        )
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: Users = Depends(get_current_active_user)):
