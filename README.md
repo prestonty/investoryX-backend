@@ -1,32 +1,32 @@
 # InvestoryX Backend
 
-This is the backend repository for InvestoryX - a beginner friendly stock analytics platform
+This is the backend repository for InvestoryX - a beginner-friendly stock analytics platform built with FastAPI and PostgreSQL.
 
-# Command to Start Backend Server
+## Quick Start
 
-```console
+```bash
 uvicorn src.main:app --reload
 ```
 
-## 🛠️ Tech Stack
+## Technology Stack
 
 -   **Framework**: FastAPI 0.115.12
 -   **Database**: PostgreSQL with SQLAlchemy 2.0+
--   **Authentication**: JWT tokens, bcrypt password hashing
--   **Email**: Resend API integration
--   **Stock Data**: Yahoo Finance (yfinance), web scraping fallbacks
--   **Data Processing**: Pandas, NumPy
--   **Migrations**: Alembic
+-   **Authentication**: JWT tokens with bcrypt password hashing
+-   **Email**: Resend API integration for user verification
+-   **Stock Data**: Yahoo Finance (yfinance) with web scraping fallbacks
+-   **Data Processing**: Pandas, NumPy for financial calculations
+-   **Migrations**: Alembic for database schema management
 -   **Development**: Poetry for dependency management
 
-## 📋 Prerequisites
+## Prerequisites
 
 -   Python 3.12+
 -   PostgreSQL database
 -   Poetry (for dependency management)
 -   Environment variables configured
 
-## 🔧 Installation & Setup
+## Installation & Setup
 
 ### 1. Clone and Navigate
 
@@ -88,7 +88,7 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000
 
 The server will start at `http://127.0.0.1:8000`
 
-## �� API Endpoints
+## API Endpoints
 
 ### Authentication (`/api/auth`)
 
@@ -123,7 +123,7 @@ The server will start at `http://127.0.0.1:8000`
 -   `GET /stock-history/{ticker}` - Historical stock data
 -   `GET /get-default-indexes` - Default market index ETFs
 
-## 🔐 Security Features
+## Security Features
 
 -   **Password Hashing**: bcrypt with automatic salt generation
 -   **JWT Tokens**: Access and refresh token system
@@ -131,13 +131,13 @@ The server will start at `http://127.0.0.1:8000`
 -   **CORS Protection**: Configurable cross-origin resource sharing
 -   **Rate Limiting**: Protection against API abuse
 
-## �� Data Sources
+## Data Sources
 
 -   **Primary**: Yahoo Finance API (yfinance)
 -   **Fallback**: Web scraping from stockanalysis.com
 -   **Local**: Curated ETF and market index data
 
-## 🚀 Development
+## Development
 
 ### Code Quality
 
@@ -168,7 +168,7 @@ pytest
 pytest --cov=src
 ```
 
-## 📝 Environment Variables
+## Environment Variables
 
 | Variable                      | Description                       | Default    |
 | ----------------------------- | --------------------------------- | ---------- |
@@ -181,13 +181,31 @@ pytest --cov=src
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | Refresh token lifetime            | 7          |
 | `EMAIL_TOKEN_EXPIRE_MINUTES`  | Email verification token lifetime | 1440       |
 
-## 🆘 Support
+## Frontend Integration
+
+This backend application is designed to work with the [InvestoryX Frontend](https://github.com/prestonty/investoryX) application, which provides:
+
+-   Modern React-based user interface
+-   Real-time data visualization with Plotly.js
+-   Responsive design for all device types
+-   JWT-based authentication integration
+-   Portfolio management and watchlist features
+
+The backend provides RESTful API endpoints that the frontend consumes through a centralized API layer, ensuring clean separation of concerns and maintainable code structure.
+
+## Support
 
 For issues and questions:
 
 -   Check the API documentation at `/docs` when the server is running
 -   Review the FastAPI interactive docs at `/redoc`
 -   Check the logs for detailed error information
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+This project is part of the InvestoryX financial analytics platform.
 
 ---
 
