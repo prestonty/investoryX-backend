@@ -2,6 +2,8 @@
 
 This is the backend repository for InvestoryX - a beginner-friendly stock analytics platform built with FastAPI and PostgreSQL.
 
+Here's the link to [InvestoryX Frontend](https://github.com/prestonty/investoryX)
+
 ## Quick Start
 
 ```bash
