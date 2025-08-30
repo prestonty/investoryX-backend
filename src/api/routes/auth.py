@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
-import os
 from src.api.auth.auth import get_user_by_email
 from src.api.services.email_service import sendSignUpEmail
 
@@ -74,20 +73,10 @@ async def login_for_access_token(
     
     # Ensure user is active (email verified)
     if not user.is_active:
-        # Automatically resend verification email
-        try:
-            verification_token = create_email_verification_token(user.UserId)
-            # Construct proper verification URL with token
-            frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
-            verification_url = f"{frontend_url}/verify-email?token={verification_token}"
-            sendSignUpEmail(user.email, user.Name, verification_url)
-        except Exception as e:
-            # Log the error but don't fail the request
-            print(f"Failed to resend verification email: {e}")
-        
+        # Don't resend verification email automatically - user should use the one from registration
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email not verified. A new verification email has been sent to your inbox.",
+            detail="Email not verified. Please check your email for the verification link from when you registered.",
         )
     
     # Create both access and refresh tokens
