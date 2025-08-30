@@ -373,3 +373,123 @@ def getDefaultIndexes(default_etfs):
         return default_etfs
     except Exception as e:
         raise RuntimeError(f"Failed to fetch default ETFs: {str(e)}")
+
+
+def getTopGainers(limit: int = 5):
+    """
+    Get top 5 gainers (stocks with highest percentage gains)
+    Uses yfinance to fetch data for major market movers
+    """
+    try:
+        # For now, we'll use a curated list of major stocks to check for gainers
+        # In production, you might want to use a more comprehensive list
+        major_stocks = [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
+            "AMD", "INTC", "CRM", "ORCL", "ADBE", "PYPL", "UBER", "LYFT",
+            "ZM", "SHOP", "SQ", "ROKU", "SPOT", "SNAP", "TWTR", "PINS"
+        ]
+        
+        # Get batch prices for major stocks
+        prices = getStockPricesBatch(major_stocks)
+        
+        # Filter out errors and calculate percentage changes
+        valid_stocks = []
+        for ticker, data in prices.items():
+            if "error" not in data and data.get("priceChangePercent") is not None:
+                valid_stocks.append({
+                    "ticker": ticker,
+                    "price": data["stockPrice"],
+                    "change": data["priceChange"],
+                    "changePercent": data["priceChangePercent"]
+                })
+        
+        # Sort by percentage change (highest first) and take top 5
+        top_gainers = sorted(valid_stocks, key=lambda x: x["changePercent"], reverse=True)[:limit]
+        
+        return top_gainers
+        
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch top gainers: {str(e)}")
+
+
+def getTopLosers(limit: int = 5):
+    """
+    Get top 5 losers (stocks with highest percentage losses)
+    Uses yfinance to fetch data for major market movers
+    """
+    try:
+        # For now, we'll use a curated list of major stocks to check for losers
+        # In production, you might want to use a more comprehensive list
+        major_stocks = [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
+            "AMD", "INTC", "CRM", "ORCL", "ADBE", "PYPL", "UBER", "LYFT",
+            "ZM", "SHOP", "SQ", "ROKU", "SPOT", "SNAP", "TWTR", "PINS"
+        ]
+        
+        # Get batch prices for major stocks
+        prices = getStockPricesBatch(major_stocks)
+        
+        # Filter out errors and calculate percentage changes
+        valid_stocks = []
+        for ticker, data in prices.items():
+            if "error" not in data and data.get("priceChangePercent") is not None:
+                valid_stocks.append({
+                    "ticker": ticker,
+                    "price": data["stockPrice"],
+                    "change": data["priceChange"],
+                    "changePercent": data["priceChangePercent"]
+                })
+        
+        # Sort by percentage change (lowest first) and take top 5
+        top_losers = sorted(valid_stocks, key=lambda x: x["changePercent"])[:limit]
+        
+        return top_losers
+        
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch top losers: {str(e)}")
+
+
+def getMostActive(limit: int = 5):
+    """
+    Get top 5 most actively traded stocks (highest volume)
+    Uses yfinance to fetch volume data for major stocks
+    """
+    try:
+        # For now, we'll use a curated list of major stocks to check for volume
+        # In production, you might want to use a more comprehensive list
+        major_stocks = [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
+            "AMD", "INTC", "CRM", "ORCL", "ADBE", "PYPL", "UBER", "LYFT",
+            "ZM", "SHOP", "SQ", "ROKU", "SPOT", "SNAP", "TWTR", "PINS"
+        ]
+        
+        # Get batch prices for major stocks
+        prices = getStockPricesBatch(major_stocks)
+        
+        # Filter out errors and get volume data
+        valid_stocks = []
+        for ticker, data in prices.items():
+            if "error" not in data:
+                # Get additional volume data for each stock
+                try:
+                    stock = yf.Ticker(ticker)
+                    info = stock.info
+                    volume = info.get('volume', 0)
+                    
+                    valid_stocks.append({
+                        "ticker": ticker,
+                        "price": data["stockPrice"],
+                        "change": data["priceChange"],
+                        "changePercent": data["priceChangePercent"],
+                        "volume": volume
+                    })
+                except:
+                    continue
+        
+        # Sort by volume (highest first) and take top 5
+        most_active = sorted(valid_stocks, key=lambda x: x["volume"], reverse=True)[:limit]
+        
+        return most_active
+        
+    except Exception as e:
+        raise RuntimeError(f"Failed to fetch most active stocks: {str(e)}")

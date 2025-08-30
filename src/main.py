@@ -153,6 +153,58 @@ def get_DefaultIndexes():
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# MARKET MOVERS -----------------------------------------------------------------------------------
+@app.get("/top-gainers")
+def get_TopGainers(limit: int = Query(default=5, description="Number of top gainers to return")):
+    """
+    Get top gainers (stocks with highest percentage gains).
+    
+    Args:
+        limit (int): Number of top gainers to return (default: 5)
+    
+    Returns:
+        list: List of top gainers with ticker, price, change, and changePercent.
+    """
+    try:
+        return getTopGainers(limit)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/top-losers")
+def get_TopLosers(limit: int = Query(default=5, description="Number of top losers to return")):
+    """
+    Get top losers (stocks with highest percentage losses).
+    
+    Args:
+        limit (int): Number of top losers to return (default: 5)
+    
+    Returns:
+        list: List of top losers with ticker, price, change, and changePercent.
+    """
+    try:
+        return getTopLosers(limit)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/most-active")
+def get_MostActive(limit: int = Query(default=5, description="Number of most active stocks to return")):
+    """
+    Get most actively traded stocks (highest volume).
+    
+    Args:
+        limit (int): Number of most active stocks to return (default: 5)
+    
+    Returns:
+        list: List of most active stocks with ticker, price, change, changePercent, and volume.
+    """
+    try:
+        return getMostActive(limit)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # EMAIL SERVICE -----------------------------------------------------------------------------------
 @app.post("/send-sign-up-email")
 def send_SignUpEmail(request: EmailRequest):
