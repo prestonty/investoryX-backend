@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
+import os
 from src.api.auth.auth import get_user_by_email
 from src.api.services.email_service import sendSignUpEmail
 
