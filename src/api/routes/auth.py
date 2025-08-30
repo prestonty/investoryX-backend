@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
+import os
 from src.api.auth.auth import get_user_by_email
 from src.api.services.email_service import sendSignUpEmail
 
@@ -43,8 +44,7 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class ResendVerificationRequest(BaseModel):
-    email: str
+
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(
@@ -77,7 +77,10 @@ async def login_for_access_token(
         # Automatically resend verification email
         try:
             verification_token = create_email_verification_token(user.UserId)
-            sendSignUpEmail(user.email, user.Name, verification_token)
+            # Construct proper verification URL with token
+            frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+            verification_url = f"{frontend_url}/verify-email?token={verification_token}"
+            sendSignUpEmail(user.email, user.Name, verification_url)
         except Exception as e:
             # Log the error but don't fail the request
             print(f"Failed to resend verification email: {e}")
@@ -154,9 +157,12 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
 
     # Create email verification token and send email
     verification_token = create_email_verification_token(db_user.UserId)
+    # Construct proper verification URL with token
+    frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+    verification_url = f"{frontend_url}/verify-email?token={verification_token}"
 
     try:
-        sendSignUpEmail(db_user.email, db_user.Name, verification_token)
+        sendSignUpEmail(db_user.email, db_user.Name, verification_url)
     except Exception as e:
         # If email fails, we still created the account but inform the client
         # Client can trigger resend verification later
@@ -164,31 +170,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
 
     return db_user
 
-@router.post("/resend-verification")
-async def resend_verification_email(request: ResendVerificationRequest, db: Session = Depends(get_db)):
-    """Resend verification email for a user."""
-    user = get_user_by_email(db, request.email)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No account found with this email address"
-        )
-    
-    if user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Account is already verified"
-        )
-    
-    try:
-        verification_token = create_email_verification_token(user.UserId)
-        sendSignUpEmail(user.email, user.Name, verification_token)
-        return {"message": "Verification email sent successfully"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to send verification email"
-        )
+
 
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: Users = Depends(get_current_active_user)):
