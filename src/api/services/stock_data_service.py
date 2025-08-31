@@ -398,9 +398,9 @@ def getTopGainers(limit: int = 5):
             if "error" not in data and data.get("priceChangePercent") is not None:
                 valid_stocks.append({
                     "ticker": ticker,
-                    "price": data["stockPrice"],
-                    "change": data["priceChange"],
-                    "changePercent": data["priceChangePercent"]
+                    "price": round_2_decimals(data["stockPrice"]),
+                    "change": round_2_decimals(data["priceChange"]),
+                    "changePercent": round_2_decimals(data["priceChangePercent"])
                 })
         
         # Sort by percentage change (highest first) and take top 5
@@ -435,9 +435,9 @@ def getTopLosers(limit: int = 5):
             if "error" not in data and data.get("priceChangePercent") is not None:
                 valid_stocks.append({
                     "ticker": ticker,
-                    "price": data["stockPrice"],
-                    "change": data["priceChange"],
-                    "changePercent": data["priceChangePercent"]
+                    "price": round_2_decimals(data["stockPrice"]),
+                    "change": round_2_decimals(data["priceChange"]),
+                    "changePercent": round_2_decimals(data["priceChangePercent"])
                 })
         
         # Sort by percentage change (lowest first) and take top 5
@@ -478,9 +478,9 @@ def getMostActive(limit: int = 5):
                     
                     valid_stocks.append({
                         "ticker": ticker,
-                        "price": data["stockPrice"],
-                        "change": data["priceChange"],
-                        "changePercent": data["priceChangePercent"],
+                        "price": round_2_decimals(data["stockPrice"]),
+                        "change": round_2_decimals(data["priceChange"]),
+                        "changePercent": round_2_decimals(data["priceChangePercent"]),
                         "volume": volume
                     })
                 except:
