@@ -1,0 +1,102 @@
+[
+    {
+        "title": "Broad Market & Large-Cap Indices",
+        "etfs": [
+            {
+                "ticker": "SPY",
+                "name": "SPDR S&P 500 ETF Trust",
+                "description": "Tracks the S&P 500 index of 500 large U.S. companies; one of the most traded ETFs in the world."
+            },
+            {
+                "ticker": "VOO",
+                "name": "Vanguard S&P 500 ETF",
+                "description": "Low-cost ETF tracking the S&P 500, offering exposure to leading U.S. large-cap stocks."
+            },
+            {
+                "ticker": "IVV",
+                "name": "iShares Core S&P 500 ETF",
+                "description": "iShares’ version of an S&P 500 tracker; popular for its low expense ratio and liquidity."
+            },
+            {
+                "ticker": "VTI",
+                "name": "Vanguard Total Stock Market ETF",
+                "description": "Covers the entire U.S. stock market, including large, mid, small, and micro-cap companies."
+            },
+            {
+                "ticker": "QQQ",
+                "name": "Invesco QQQ Trust",
+                "description": "Tracks the Nasdaq-100 index, focusing on large non-financial companies with a tech-heavy tilt."
+            },
+            {
+                "ticker": "IWM",
+                "name": "iShares Russell 2000 ETF",
+                "description": "Represents the Russell 2000 index of 2,000 small-cap U.S. stocks."
+            }
+        ]
+    },
+    {
+        "title": "Dow Jones Industrial Average",
+        "etfs": [
+            {
+                "ticker": "DIA",
+                "name": "SPDR Dow Jones Industrial Average ETF Trust",
+                "description": "Tracks the Dow Jones Industrial Average, a price-weighted index of 30 blue-chip U.S. companies."
+            },
+            {
+                "ticker": "DJD",
+                "name": "Invesco Dow Jones Industrial Average Dividend ETF",
+                "description": "Tracks the same 30 Dow stocks but weighted by dividend yield instead of price."
+            }
+        ]
+    },
+    {
+        "title": "Sector ETFs",
+        "etfs": [
+            {
+                "ticker": "XLF",
+                "name": "Financial Select Sector SPDR Fund",
+                "description": "Tracks S&P 500 financial companies, including banks, insurers, and asset managers."
+            },
+            {
+                "ticker": "XLI",
+                "name": "Industrial Select Sector SPDR Fund",
+                "description": "Covers S&P 500 industrial companies such as manufacturers, airlines, and transportation firms."
+            },
+            {
+                "ticker": "XLY",
+                "name": "Consumer Discretionary Select Sector SPDR Fund",
+                "description": "Focuses on S&P 500 companies in consumer goods and services that are non-essential purchases."
+            },
+            {
+                "ticker": "XLP",
+                "name": "Consumer Staples Select Sector SPDR Fund",
+                "description": "Tracks S&P 500 companies producing essential goods like food, beverages, and household products."
+            },
+            {
+                "ticker": "XLU",
+                "name": "Utilities Select Sector SPDR Fund",
+                "description": "Represents S&P 500 utility companies providing electricity, gas, and water services."
+            },
+            {
+                "ticker": "XLK",
+                "name": "Technology Select Sector SPDR Fund",
+                "description": "Tracks S&P 500 technology companies, including Apple, Microsoft, and Nvidia."
+            },
+            {
+                "ticker": "XLV",
+                "name": "Health Care Select Sector SPDR Fund",
+                "description": "Tracks S&P 500 health care companies such as Johnson & Johnson, UnitedHealth, and Pfizer."
+            },
+            {
+                "ticker": "XLE",
+                "name": "Energy Select Sector SPDR Fund",
+                "description": "Tracks S&P 500 energy companies, including oil, gas, and renewable energy producers."
+            },
+            {
+                "ticker": "XLRE",
+                "name": "Real Estate Select Sector SPDR Fund",
+                "description": "Tracks S&P 500 real estate companies, including REITs and property management firms."
+            }
+        ]
+    }
+]
