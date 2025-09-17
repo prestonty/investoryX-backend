@@ -6,6 +6,7 @@ npm-shrinkwrap.json
 *.gz
 
 .env
+.venv
 
 # Coveralls
 .nyc_output
