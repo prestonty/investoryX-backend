@@ -42,8 +42,9 @@ cd backend2
 # Using Poetry (recommended)
 poetry install
 
-# Or using pip
-pip install -r requirements.txt
+# Update dependencies
+poetry lock
+
 ```
 
 ### 3. Environment Configuration
