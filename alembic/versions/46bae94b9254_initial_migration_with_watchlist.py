@@ -30,13 +30,13 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('stock_id')
     )
     op.create_table('users',
-    sa.Column('UserId', sa.Integer(), nullable=False),
-    sa.Column('Name', sa.String(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('name', sa.String(), nullable=False),
     sa.Column('email', sa.String(), nullable=False),
     sa.Column('password', sa.String(), nullable=False),
     sa.Column('timestamp', sa.TIMESTAMP(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('is_active', sa.Boolean(), server_default='FALSE', nullable=True),
-    sa.PrimaryKeyConstraint('UserId')
+    sa.PrimaryKeyConstraint('user_id')
     )
     op.create_table('watchlist',
     sa.Column('watchlist_id', sa.Integer(), nullable=False),

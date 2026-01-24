@@ -14,8 +14,8 @@ from src.models.users import Users
 # Load environment variables
 load_dotenv()
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Password hashing (argon2 default; bcrypt allowed for legacy hashes)
+pwd_context = CryptContext(schemes=["argon2", "bcrypt"], deprecated="auto")
 
 # Token configuration
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -45,7 +45,7 @@ def get_user_by_email(db: Session, email: str) -> Optional[Users]:
 
 def get_user_by_id(db: Session, user_id: int) -> Optional[Users]:
     """Get user by ID from database."""
-    return db.query(Users).filter(Users.UserId == user_id).first()
+    return db.query(Users).filter(Users.user_id == user_id).first()
 
 def authenticate_user(db: Session, email: str, password: str) -> Optional[Users]:
     """Authenticate a user with email and password."""
@@ -94,13 +94,13 @@ def refresh_access_token(request: Request, db: Session):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token payload")
 
     # Verify user exists and is active
-    user = db.query(Users).filter(Users.UserId == int(user_id)).first()
+    user = db.query(Users).filter(Users.user_id == int(user_id)).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
 
     # Create a new access token
     new_access_token = create_access_token(
-        data={"sub": str(user.UserId)},
+        data={"sub": str(user.user_id)},
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 

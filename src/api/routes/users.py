@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
 from src.api.database.database import get_db
@@ -16,14 +16,13 @@ class UserCreate(BaseModel):
     password: str
 
 class UserResponse(BaseModel):
-    userId: int
-    name: str
+    userId: int = Field(alias="userId")
+    name: str = Field(alias="name")
     email: str
     timestamp: datetime
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -33,7 +32,7 @@ def get_user(
     current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific user by ID (requires authentication)."""
-    user = db.query(Users).filter(Users.UserId == user_id).first()
+    user = db.query(Users).filter(Users.userId == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
@@ -51,7 +50,7 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     
     # Create user with hashed password
     db_user = Users(
-        name=user.name,
+        Name=user.name,
         email=user.email,
         password=hashed_password,
         is_active=True

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import JSONResponse
 import os
 from src.api.auth.auth import get_user_by_email
@@ -25,24 +25,31 @@ from src.api.auth.auth import (
 from src.models.users import Users
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
+DISABLE_EMAIL_VERIFICATION = os.getenv("DISABLE_EMAIL_VERIFICATION", "false").lower() in ("1", "true", "yes")
 
 class Token(BaseModel):
     access_token: str
     token_type: str
 
 class UserCreate(BaseModel):
-    Name: str
+    model_config = ConfigDict(populate_by_name=True)
+    name: str = Field(alias="Name")
     email: str
     password: str
 
 class UserResponse(BaseModel):
-    UserId: int
-    Name: str
+    user_id: int
+    name: str
     email: str
     is_active: bool
 
     class Config:
         from_attributes = True
+
+class TestEmailRequest(BaseModel):
+    email: str
+    name: str
+    verification_url: str | None = None
 
 
 
@@ -72,8 +79,8 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Ensure user is active (email verified)
-    if not user.is_active:
+    # Ensure user is active (email verified) unless verification is disabled
+    if not user.is_active and not DISABLE_EMAIL_VERIFICATION:
         # Don't resend verification email automatically - user should use the one from registration
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -83,12 +90,12 @@ async def login_for_access_token(
     # Create both access and refresh tokens
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": str(user.UserId)}, expires_delta=access_token_expires
+        data={"sub": str(user.user_id)}, expires_delta=access_token_expires
     )
     
     refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     refresh_token = create_refresh_token(
-        data={"sub": str(user.UserId)}, expires_delta=refresh_token_expires
+        data={"sub": str(user.user_id)}, expires_delta=refresh_token_expires
     )
     
     # Create response with tokens
@@ -124,41 +131,50 @@ async def login_for_access_token(
 @router.post("/register", response_model=UserResponse)
 async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
-    # Check if user already exists
-    existing_user = db.query(Users).filter(Users.email == user.email).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    
-    # Create new user with hashed password
-    hashed_password = get_password_hash(user.password)
-    db_user = Users(
-        Name=user.Name,
-        email=user.email,
-        password=hashed_password,
-        is_active=False  # Set to False until email verification
-    )
-    
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-
-    # Create email verification token and send email
-    verification_token = create_email_verification_token(db_user.UserId)
-    # Construct proper verification URL with token
-    frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
-    verification_url = f"{frontend_url}/verify-email?token={verification_token}"
-
     try:
-        sendSignUpEmail(db_user.email, db_user.Name, verification_url)
-    except Exception as e:
-        # If email fails, we still created the account but inform the client
-        # Client can trigger resend verification later
-        pass
+        # Check if user already exists
+        existing_user = db.query(Users).filter(Users.email == user.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            )
 
-    return db_user
+        # Create new user with hashed password
+        hashed_password = get_password_hash(user.password)
+        db_user = Users(
+            name=user.name,
+            email=user.email,
+            password=hashed_password,
+            is_active=DISABLE_EMAIL_VERIFICATION is True,  # Set to True when verification is disabled
+        )
+
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+
+        if not DISABLE_EMAIL_VERIFICATION:
+            # Create email verification token and send email
+            verification_token = create_email_verification_token(db_user.user_id)
+            # Construct proper verification URL with token
+            frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+            verification_url = f"{frontend_url}/verify-email?token={verification_token}"
+
+            try:
+                sendSignUpEmail(db_user.email, db_user.name, verification_url)
+            except Exception:
+                # If email fails, we still created the account but inform the client
+                # Client can trigger resend verification later
+                pass
+
+        return db_user
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {exc}",
+        )
 
 
 
@@ -174,7 +190,7 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
     if user_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
 
-    user = db.query(Users).filter(Users.UserId == user_id).first()
+    user = db.query(Users).filter(Users.user_id == user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -225,3 +241,16 @@ async def logout():
     )
     
     return response
+
+@router.post("/test-email")
+async def test_email(payload: TestEmailRequest):
+    """Send a test verification email to validate Resend setup."""
+    verification_url = payload.verification_url or "http://localhost:3000/verify-email?token=test"
+    try:
+        sendSignUpEmail(payload.email, payload.name, verification_url)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Email send failed: {exc}",
+        )
+    return {"message": "Test email sent"}

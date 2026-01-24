@@ -13,6 +13,7 @@ version = "0.1.0"
 description = ""
 authors = ["Preston Tom-Ying <preston.tomying@gmail.com>"]
 readme = "README.md"
+packages = [{ include = "src" }]
 
 [tool.poetry.dependencies]
 python = ">=3.12"
@@ -32,7 +33,7 @@ starlette = "0.44.0"
 uvicorn = "0.33.0"
 httpx = ">=0.28.1,<0.29.0"
 selectolax = ">=0.3.31,<0.4.0"
-passlib = {version = ">=1.7.4,<2.0.0", extras = ["bcrypt"]}
+passlib = {version = ">=1.7.4,<2.0.0", extras = ["argon2", "bcrypt"]}
 "python-jose" = {version = ">=3.3.0,<4.0.0", extras = ["cryptography"]}
 "python-multipart" = ">=0.0.6,<1.0.0"
 sqlalchemy = ">=2.0.0,<3.0.0"

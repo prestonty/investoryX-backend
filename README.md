@@ -10,6 +10,26 @@ Here's the link to [InvestoryX Frontend](https://github.com/prestonty/investoryX
 uvicorn src.main:app --reload
 ```
 
+## Docker Commands
+
+Start the backend in the background (rebuilds the image):
+
+```bash
+docker compose up -d --build backend
+```
+
+Stream backend logs (including request access logs):
+
+```bash
+docker compose logs -f backend
+```
+
+Run the backend in the foreground to see logs inline:
+
+```bash
+docker compose up --build backend
+```
+
 ## Technology Stack
 
 -   **Framework**: FastAPI 0.115.12
@@ -63,6 +83,9 @@ ALGORITHM=HS256
 # Email Service
 RESEND_API_KEY=your_resend_api_key
 
+# Feature Flags
+DISABLE_EMAIL_VERIFICATION=false
+
 # Frontend URLs (for CORS)
 FRONTEND_BASE_URL=http://localhost:3000
 
@@ -83,7 +106,14 @@ alembic upgrade head
 
 ```bash
 # Development mode with auto-reload
+poetry run uvicorn src.main:app --reload
+
+# Or
 uvicorn src.main:app --reload
+
+# Better for debugging
+poetry run uvicorn src.main:app --reload --log-level debug
+
 
 # Production mode
 uvicorn src.main:app --host 0.0.0.0 --port 8000
@@ -183,6 +213,7 @@ pytest --cov=src
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime             | 30         |
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | Refresh token lifetime            | 7          |
 | `EMAIL_TOKEN_EXPIRE_MINUTES`  | Email verification token lifetime | 1440       |
+| `DISABLE_EMAIL_VERIFICATION`  | Skip email verification on signup | false      |
 
 ## Frontend Integration
 

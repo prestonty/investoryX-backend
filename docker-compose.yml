@@ -18,6 +18,8 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DISABLE_EMAIL_VERIFICATION: ${DISABLE_EMAIL_VERIFICATION:-false}
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug", "--access-log"]
     ports:
       - "8000:8000"
     depends_on:

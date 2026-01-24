@@ -27,7 +27,7 @@ def get_user_watchlist(
     current_user: Users = Depends(get_current_active_user)
 ):
     """Get current user's watchlist (requires authentication)."""
-    watchlist = db.query(Watchlist).filter(Watchlist.user_id == current_user.UserId).all()
+    watchlist = db.query(Watchlist).filter(Watchlist.user_id == current_user.user_id).all()
     return watchlist
 
 @router.post("/", response_model=WatchItemResponse)
@@ -39,7 +39,7 @@ def add_to_watchlist(
     """Add a stock to current user's watchlist (requires authentication)."""
     # Check if item already exists in user's watchlist
     existing_item = db.query(Watchlist).filter(
-        Watchlist.user_id == current_user.UserId,
+        Watchlist.user_id == current_user.user_id,
         Watchlist.stock_id == watch_item.stock_id
     ).first()
     
@@ -48,7 +48,7 @@ def add_to_watchlist(
     
     db_watch_item = Watchlist(
         stock_id=watch_item.stock_id,
-        user_id=current_user.UserId
+        user_id=current_user.user_id
     )
     db.add(db_watch_item)
     db.commit()
@@ -64,7 +64,7 @@ def remove_from_watchlist(
     """Remove a stock from current user's watchlist (requires authentication)."""
     watch_item = db.query(Watchlist).filter(
         Watchlist.watchlist_id == watchlist_id,
-        Watchlist.user_id == current_user.UserId  # Ensure user can only delete their own items
+        Watchlist.user_id == current_user.user_id  # Ensure user can only delete their own items
     ).first()
     
     if not watch_item:
