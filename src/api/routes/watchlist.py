@@ -2,11 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from src.api.database.database import get_db
 from src.api.auth.auth import get_current_active_user
 from src.models.watchlist import Watchlist
 from src.models.users import Users
+from src.models.stocks import Stocks
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 
@@ -37,6 +39,11 @@ def add_to_watchlist(
     current_user: Users = Depends(get_current_active_user)
 ):
     """Add a stock to current user's watchlist (requires authentication)."""
+    # Ensure stock exists
+    stock = db.query(Stocks).filter(Stocks.stock_id == watch_item.stock_id).first()
+    if not stock:
+        raise HTTPException(status_code=404, detail="Stock not found")
+
     # Check if item already exists in user's watchlist
     existing_item = db.query(Watchlist).filter(
         Watchlist.user_id == current_user.user_id,
@@ -51,7 +58,11 @@ def add_to_watchlist(
         user_id=current_user.user_id
     )
     db.add(db_watch_item)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Stock already in watchlist")
     db.refresh(db_watch_item)
     return db_watch_item
 
@@ -70,6 +81,25 @@ def remove_from_watchlist(
     if not watch_item:
         raise HTTPException(status_code=404, detail="Watch item not found")
     
+    db.delete(watch_item)
+    db.commit()
+    return {"message": "Watch item removed"}
+
+@router.delete("/by-stock/{stock_id}")
+def remove_from_watchlist_by_stock(
+    stock_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user)
+):
+    """Remove a stock from current user's watchlist by stock_id."""
+    watch_item = db.query(Watchlist).filter(
+        Watchlist.stock_id == stock_id,
+        Watchlist.user_id == current_user.user_id
+    ).first()
+
+    if not watch_item:
+        raise HTTPException(status_code=404, detail="Watch item not found")
+
     db.delete(watch_item)
     db.commit()
     return {"message": "Watch item removed"}
