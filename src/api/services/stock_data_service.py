@@ -106,9 +106,9 @@ def getStockPrice(ticker: str, etf: bool = False):
             raise RuntimeError(f"Both yfinance and web scraping failed for {ticker}. yfinance error: {str(e)}, web scraping error: {str(web_error)}")
 
 
-def getStockPricesBatch(tickers):
+def getQuotes(tickers):
     """
-    Fetches stock prices for multiple tickers using yfinance.
+    Fetches stock quotes - a snapshot of a stock's current market status for multiple tickers using yfinance.
     Respects Yahoo Finance's limit of ~30 tickers per batch.
     Add throttling to avoid rate limits
     """
@@ -359,7 +359,7 @@ def getDefaultIndexes(default_etfs):
         if not default_etfs:
             raise ValueError("No default ETFs provided")
         tickers = {etf["ticker"] for cat in default_etfs for etf in cat["etfs"]}
-        prices = getStockPricesBatch(list(tickers))
+        prices = getQuotes(list(tickers))
 
         for category in default_etfs:
             for etf in category["etfs"]:
@@ -390,7 +390,7 @@ def getTopGainers(limit: int = 5):
         ]
         
         # Get batch prices for major stocks
-        prices = getStockPricesBatch(major_stocks)
+        prices = getQuotes(major_stocks)
         
         # Filter out errors and calculate percentage changes
         valid_stocks = []
@@ -427,7 +427,7 @@ def getTopLosers(limit: int = 5):
         ]
         
         # Get batch prices for major stocks
-        prices = getStockPricesBatch(major_stocks)
+        prices = getQuotes(major_stocks)
         
         # Filter out errors and calculate percentage changes
         valid_stocks = []
@@ -464,7 +464,7 @@ def getMostActive(limit: int = 5):
         ]
         
         # Get batch prices for major stocks
-        prices = getStockPricesBatch(major_stocks)
+        prices = getQuotes(major_stocks)
         
         # Filter out errors and get volume data
         valid_stocks = []

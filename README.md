@@ -4,12 +4,6 @@ This is the backend repository for InvestoryX - a beginner-friendly stock analyt
 
 Here's the link to [InvestoryX Frontend](https://github.com/prestonty/investoryX)
 
-## Quick Start
-
-```bash
-uvicorn src.main:app --reload
-```
-
 ## Docker Commands
 
 Start the backend in the background (rebuilds the image):
@@ -108,15 +102,12 @@ alembic upgrade head
 # Development mode with auto-reload
 poetry run uvicorn src.main:app --reload
 
-# Or
-uvicorn src.main:app --reload
-
 # Better for debugging
 poetry run uvicorn src.main:app --reload --log-level debug
 
 
 # Production mode
-uvicorn src.main:app --host 0.0.0.0 --port 8000
+poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
 The server will start at `http://127.0.0.1:8000`
