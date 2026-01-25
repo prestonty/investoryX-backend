@@ -38,6 +38,7 @@ class WatchlistQuoteItem(BaseModel):
     stock_id: int
     user_id: int
     ticker: str
+    company_name: str
     stockPrice: Optional[float] = None
     priceChange: Optional[float] = None
     priceChangePercent: Optional[float] = None
@@ -115,6 +116,7 @@ def get_watchlist_quotes(
                 stock_id=watch_item.stock_id,
                 user_id=watch_item.user_id,
                 ticker=ticker,
+                company_name=stock.company_name,
                 stockPrice=None if error else price_data.get("stockPrice"),
                 priceChange=None if error else price_data.get("priceChange"),
                 priceChangePercent=None if error else price_data.get("priceChangePercent"),
