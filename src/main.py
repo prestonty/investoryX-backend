@@ -18,7 +18,7 @@ from src.api.database.database import engine, Base
 
 
 from src.models.requests import EmailRequest
-from src.api.routes import stocks, users, watchlist, auth
+from src.api.routes import stocks, users, watchlist, auth, simulator
 
 # Services
 from src.api.services.stock_data_service import *
@@ -77,6 +77,7 @@ app.include_router(stocks.router)
 app.include_router(users.router)
 app.include_router(watchlist.router)
 app.include_router(auth.router)
+app.include_router(simulator.router)
 
 
 # File Paths --------------------------------------------------------------------------------------

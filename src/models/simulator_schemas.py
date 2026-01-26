@@ -82,3 +82,7 @@ class SimulatorSummaryResponse(BaseModel):
     positions: List[SimulatorPositionResponse]
     trades: List[SimulatorTradeResponse]
     cash_ledger: List[SimulatorCashLedgerResponse]
+
+
+class MessageResponse(BaseModel):
+    message: str
