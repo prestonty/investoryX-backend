@@ -3,6 +3,7 @@ from sqlalchemy import Column, ForeignKey, Integer, Numeric, String, TIMESTAMP, 
 
 
 class SimulatorCashLedger(Base):
+    # Cash Ledger is a record of all a business's cash inflows and outflows. We keep a record of them for bot trading
     __tablename__ = "simulator_cash_ledger"
     __table_args__ = (Index("ix_simulator_cash_ledger_simulator_id", "simulator_id"),)
 

@@ -3,6 +3,7 @@ from sqlalchemy import Column, ForeignKey, Integer, String, TIMESTAMP, Numeric, 
 
 
 class Simulator(Base):
+    # Simulator represents a single paper-trading bot configuration and its cash state.
     __tablename__ = "simulators"
     __table_args__ = (Index("ix_simulators_user_id", "user_id"),)
 

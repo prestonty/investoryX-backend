@@ -12,6 +12,7 @@ from sqlalchemy import (
 
 
 class SimulatorTrackedStock(Base):
+    # SimulatorTrackedStock defines which tickers a simulator watches and their target allocation.
     __tablename__ = "simulator_tracked_stocks"
     __table_args__ = (
         UniqueConstraint(

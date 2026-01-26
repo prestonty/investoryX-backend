@@ -11,6 +11,7 @@ from sqlalchemy import (
 
 
 class SimulatorPosition(Base):
+    # SimulatorPosition stores the current holdings for a simulator by ticker.
     __tablename__ = "simulator_positions"
     __table_args__ = (
         UniqueConstraint(

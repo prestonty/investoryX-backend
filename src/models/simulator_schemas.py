@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from pydantic import BaseModel
 
@@ -86,3 +86,16 @@ class SimulatorSummaryResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class SimulatorRunResponse(BaseModel):
+    message: str
+    trades_executed: int
+    cash_balance: float
+    price_mode: str
+    frequency: str
+
+
+class SimulatorRunRequest(BaseModel):
+    price_mode: Literal["open", "close"] = "close"
+    frequency: Literal["daily", "twice_daily"] = "daily"

@@ -3,6 +3,7 @@ from sqlalchemy import Column, ForeignKey, Integer, Numeric, String, TIMESTAMP, 
 
 
 class SimulatorTrade(Base):
+    # SimulatorTrade is an immutable log of buy/sell actions executed by a simulator.
     __tablename__ = "simulator_trades"
     __table_args__ = (Index("ix_simulator_trade_simulator_id", "simulator_id"),)
 
