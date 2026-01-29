@@ -152,11 +152,12 @@ def getQuotes(tickers):
 def getStockHistory(ticker: str, period: Period, interval: Interval):
     try:
         stockData = yf.Ticker(ticker)
-        history = stockData.history(period=period, interval=interval)
+        history = stockData.history(period=str(period), interval=str(interval))
 
-        history = history.reset_index() # Condex index (Date) into a column
+        history = history.reset_index() # Condex index (Date/Datetime) into a column
         history = history.rename(columns={
             "Date": "date",
+            "Datetime": "date",
             "Open": "open",
             "High": "high",
             "Low": "low",
