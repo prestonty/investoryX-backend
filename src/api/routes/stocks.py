@@ -158,7 +158,7 @@ def search_stocks(filter_string: str, db: Session = Depends(get_db)):
     ).limit(LIMIT).all()  # case insensitive comparison
 
     if not stocks:
-        raise HTTPException(status_code=404, detail="Stock not found")
+        []
     return [
         {"label": f"{stock.ticker} - {stock.company_name}", "value": stock.ticker}
         for stock in stocks
