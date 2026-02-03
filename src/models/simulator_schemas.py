@@ -17,6 +17,7 @@ class SimulatorResponse(BaseModel):
     cash_balance: float
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
+    tickers: List[str] = []
 
     class Config:
         from_attributes = True

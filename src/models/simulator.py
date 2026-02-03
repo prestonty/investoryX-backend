@@ -1,6 +1,6 @@
 from src.api.database.database import Base
 from sqlalchemy import Column, ForeignKey, Integer, String, TIMESTAMP, Numeric, text, Index
-
+from sqlalchemy.orm import relationship
 
 class Simulator(Base):
     # Simulator represents a single paper-trading bot configuration and its cash state.
@@ -14,3 +14,8 @@ class Simulator(Base):
     cash_balance = Column(Numeric(12, 2), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    tracked_stocks = relationship(
+        "SimulatorTrackedStock",
+        
+    )

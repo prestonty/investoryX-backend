@@ -9,7 +9,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
 )
-
+from sqlalchemy.orm import relationship
 
 class SimulatorTrackedStock(Base):
     # SimulatorTrackedStock defines which tickers a simulator watches and their target allocation.
@@ -32,3 +32,5 @@ class SimulatorTrackedStock(Base):
     ticker = Column(String, nullable=False)
     target_allocation = Column(Numeric(5, 2), nullable=False)
     enabled = Column(Boolean, server_default="TRUE")
+
+    simulator = relationship("Simulator", back_populates="tracked_stocks")

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from typing import List
 
@@ -69,12 +69,26 @@ def list_simulators(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_active_user),
 ):
-    return (
+    sims = (
         db.query(Simulator)
+        .options(selectinload(Simulator.tracked_stocks))
         .filter(Simulator.user_id == current_user.user_id)
         .order_by(Simulator.simulator_id.desc())
         .all()
     )
+    return [
+        SimulatorResponse(
+            simulator_id=s.simulator_id,
+            user_id=s.user_id,
+            name=s.name,
+            starting_cash=s.starting_cash,
+            cash_balance=s.cash_balance,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+            tickers=[ts.ticker for ts in s.tracked_stocks],
+        )
+        for s in sims
+    ]
 
 
 @router.post(
