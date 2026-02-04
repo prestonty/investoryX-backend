@@ -33,6 +33,10 @@ class StockSearchItem(BaseModel):
         from_attributes = True
 
 
+class StockExistsResponse(BaseModel):
+    exists: bool
+
+
 class WatchlistQuoteItem(BaseModel):
     watchlist_id: int
     stock_id: int
@@ -83,6 +87,17 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
     if not stock:
         raise HTTPException(status_code=404, detail="Stock not found")
     return stock
+
+
+@router.get("/exists/{ticker}", response_model=StockExistsResponse)
+def stock_exists(ticker: str, db: Session = Depends(get_db)):
+    exists = (
+        db.query(Stocks.stock_id)
+        .filter(Stocks.ticker.ilike(ticker))
+        .first()
+        is not None
+    )
+    return {"exists": exists}
 
 
 @router.get("/watchlist/quotes", response_model=List[WatchlistQuoteItem])
