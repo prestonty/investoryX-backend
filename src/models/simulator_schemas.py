@@ -23,6 +23,10 @@ class SimulatorResponse(BaseModel):
         from_attributes = True
 
 
+class SimulatorRenameRequest(BaseModel):
+    name: str
+
+
 class SimulatorTrackedStockCreate(BaseModel):
     ticker: str
     target_allocation: float

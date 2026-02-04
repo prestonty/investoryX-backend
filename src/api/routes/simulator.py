@@ -16,6 +16,7 @@ from src.models.simulator_cash_ledger import SimulatorCashLedger
 from src.models.simulator_schemas import (
     SimulatorCreate,
     SimulatorResponse,
+    SimulatorRenameRequest,
     SimulatorTrackedStockCreate,
     SimulatorTrackedStockResponse,
     SimulatorSummaryResponse,
@@ -63,6 +64,26 @@ def create_simulator(
     db.refresh(simulator)
     return simulator
 
+@router.patch("/rename/{simulator_id}/", response_model=SimulatorResponse)
+def rename_simulator(
+    simulator_id: int,
+    payload: SimulatorRenameRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user),
+):
+    simulator = get_user_simulator(db, simulator_id, current_user.user_id)
+    if not simulator:
+        raise HTTPException(status_code=404, detail="Simulator not found")
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+
+    simulator.name = name
+    db.add(simulator)
+    db.commit()
+    db.refresh(simulator)
+    return SimulatorResponse.model_validate(simulator)
 
 @router.get("/", response_model=List[SimulatorResponse])
 def list_simulators(
