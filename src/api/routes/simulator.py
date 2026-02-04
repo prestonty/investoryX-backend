@@ -373,6 +373,20 @@ def delete_simulator(
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
 
+    # Delete all items associated with this simulator id before deleting the simulator
+    db.query(SimulatorTrackedStock).filter(
+        SimulatorTrackedStock.simulator_id == simulator_id
+    ).delete(synchronize_session=False)
+    db.query(SimulatorPosition).filter(
+        SimulatorPosition.simulator_id == simulator_id
+    ).delete(synchronize_session=False)
+    db.query(SimulatorTrade).filter(
+        SimulatorTrade.simulator_id == simulator_id
+    ).delete(synchronize_session=False)
+    db.query(SimulatorCashLedger).filter(
+        SimulatorCashLedger.simulator_id == simulator_id
+    ).delete(synchronize_session=False)
+
     db.delete(simulator)
     db.commit()
     return {"message": "Simulator removed"}
