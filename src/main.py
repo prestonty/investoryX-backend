@@ -11,7 +11,7 @@ import logging
 from alembic.config import Config
 from alembic import command
 
-from src.dataTypes.history import Period, Interval
+from src.data_types.history import Period, Interval
 
 # Create the tables if they do not exist
 from src.api.database.database import engine, Base

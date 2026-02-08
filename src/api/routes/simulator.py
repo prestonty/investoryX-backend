@@ -6,7 +6,7 @@ from typing import List
 from src.api.database.database import get_db
 from src.api.auth.auth import get_current_active_user
 from src.api.services.stock_data_service import getStockHistory
-from src.dataTypes.history import Period, Interval
+from src.data_types.history import Period, Interval
 from src.models.users import Users
 from src.models.simulator import Simulator
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
