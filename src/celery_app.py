@@ -1,6 +1,6 @@
 import os
-
 from celery import Celery
+from src.trading_engine.schedules.beat import beat_schedule
 
 
 broker_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
@@ -21,3 +21,5 @@ app.conf.update(
     task_send_sent_event=True,
     result_expires=60 * 60 * 24,
 )
+
+app.config.beat_schedule = beat_schedule
