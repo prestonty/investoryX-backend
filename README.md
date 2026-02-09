@@ -6,22 +6,22 @@ Here's the link to [InvestoryX Frontend](https://github.com/prestonty/investoryX
 
 ## Docker Commands
 
-Start the backend in the background (rebuilds the image):
+Start the full stack (backend + db + redis):
 
 ```bash
-docker compose up -d --build backend
+docker compose up --build
 ```
 
-Stream backend logs (including request access logs):
+Start in the background:
+
+```bash
+docker compose up -d --build
+```
+
+Stream backend logs:
 
 ```bash
 docker compose logs -f backend
-```
-
-Run the backend in the foreground to see logs inline:
-
-```bash
-docker compose up --build backend
 ```
 
 ## Technology Stack
@@ -47,7 +47,7 @@ docker compose up --build backend
 ### 1. Clone and Navigate
 
 ```bash
-cd backend2
+cd investoryX-backend
 ```
 
 ### 2. Install Dependencies
@@ -55,9 +55,6 @@ cd backend2
 ```bash
 # Using Poetry (recommended)
 poetry install
-
-# Update dependencies
-poetry lock
 
 ```
 
@@ -105,9 +102,14 @@ poetry run uvicorn src.main:app --reload
 # Better for debugging
 poetry run uvicorn src.main:app --reload --log-level debug
 
-
 # Production mode
 poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000
+
+# Run via Docker (first time or after dependency changes)
+docker compose up --build
+
+# Run via Docker (no dependency changes)
+docker compose up
 ```
 
 The server will start at `http://127.0.0.1:8000`
@@ -205,6 +207,9 @@ pytest --cov=src
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | Refresh token lifetime            | 7          |
 | `EMAIL_TOKEN_EXPIRE_MINUTES`  | Email verification token lifetime | 1440       |
 | `DISABLE_EMAIL_VERIFICATION`  | Skip email verification on signup | false      |
+| `CELERY_BROKER_URL`           | Celery broker URL (Redis)         | Required   |
+| `CELERY_RESULT_BACKEND`       | Celery result backend (Redis)     | Required   |
+| `CELERY_TIMEZONE`             | Celery timezone                   | America/New_York |
 
 ## Frontend Integration
 
