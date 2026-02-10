@@ -11,7 +11,12 @@ app = Celery(
     "investoryx",
     broker=broker_url,
     backend=result_backend,
-    include=["src.trading_engine.tasks"],
+    include=[
+        "src.trading_engine.tasks.fetch_prices",
+        "src.trading_engine.tasks.evaluate_strategies",
+        "src.trading_engine.tasks.execute_paper_trades",
+        "src.trading_engine.tasks.reconcile_portfolios",
+    ]
 )
 
 app.conf.update(
@@ -22,4 +27,4 @@ app.conf.update(
     result_expires=60 * 60 * 24,
 )
 
-app.config.beat_schedule = beat_schedule
+app.conf.beat_schedule = beat_schedule

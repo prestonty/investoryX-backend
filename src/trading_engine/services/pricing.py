@@ -247,7 +247,6 @@ class SqlPriceBarRepository(PriceBarRepository):
             },
         )
 
-        symbols = _normalize_symbols(symbols)
         session = SessionLocal()
         try:
             result = session.execute(stmt)

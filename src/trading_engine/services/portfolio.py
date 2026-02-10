@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from .execution import Trade
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .execution import Trade
 
 
 @dataclass(frozen=True)
@@ -29,7 +32,7 @@ class PortfolioRepository(Protocol):
     def get_snapshot(self, user_id: int) -> PortfolioSnapshot:
         raise NotImplementedError
 
-    def apply_trades(self, user_id: int, trades: list[Trade]) -> PortfolioSnapshot:
+    def apply_trades(self, user_id: int, trades: list["Trade"]) -> PortfolioSnapshot:
         raise NotImplementedError
 
     def record_snapshot(self, snapshot: PortfolioSnapshot) -> None:
@@ -44,7 +47,7 @@ class PortfolioService:
     def load_portfolio(self, user_id: int) -> PortfolioSnapshot:
         return self._repo.get_snapshot(user_id)
 
-    def apply_trades(self, user_id: int, trades: list[Trade]) -> PortfolioSnapshot:
+    def apply_trades(self, user_id: int, trades: list["Trade"]) -> PortfolioSnapshot:
         return self._repo.apply_trades(user_id, trades)
 
     def snapshot(self, snapshot: PortfolioSnapshot) -> None:
