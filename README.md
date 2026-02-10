@@ -24,6 +24,22 @@ Stream backend logs:
 docker compose logs -f backend
 ```
 
+### Postgres Ports (Local vs Docker)
+
+By default, Docker maps Postgres to `localhost:5432`. If you also run a local
+postgres instance, change the port mapping to avoid conflicts.
+
+In `docker-compose.yml` (db service):
+
+```yaml
+ports:
+  - "5433:5432"
+```
+
+Then connect with:
+- Local Postgres: `localhost:5432`
+- Docker Postgres: `localhost:5433`
+
 ## Technology Stack
 
 -   **Framework**: FastAPI 0.115.12
@@ -110,6 +126,22 @@ docker compose up --build
 
 # Run via Docker (no dependency changes)
 docker compose up
+```
+
+### Populate Stock Table
+
+The search features read from the db and to use this feature, you must populate the db with stocks via python script.
+
+Run locally with Poetry:
+
+```bash
+poetry run python src/api/database/populateStockData.py
+```
+
+Run inside Docker (recommended if backend uses Docker DB):
+
+```bash
+docker compose run --rm backend python src/api/database/populateStockData.py
 ```
 
 The server will start at `http://127.0.0.1:8000`
