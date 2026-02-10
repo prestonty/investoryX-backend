@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 
 
 # revision identifiers, used by Alembic.
@@ -20,6 +21,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    bind = op.get_bind()
+    if _table_exists(bind, "simulators"):
+        return
     op.create_table(
         "simulators",
         sa.Column("simulator_id", sa.Integer(), nullable=False),
@@ -259,6 +263,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    bind = op.get_bind()
+    if _table_exists(bind, "simulations"):
+        return
     op.create_table(
         "simulations",
         sa.Column("simulation_id", sa.Integer(), nullable=False),
@@ -494,3 +501,15 @@ def downgrade() -> None:
     op.drop_table("simulator_positions")
     op.drop_table("simulator_tracked_stocks")
     op.drop_table("simulators")
+
+
+def _table_exists(bind, table_name: str) -> bool:
+    query = text(
+        """
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_name = :table_name
+        """
+    )
+    result = bind.execute(query, {"table_name": table_name}).first()
+    return result is not None
