@@ -1,7 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Protocol
 import logging
 
@@ -20,10 +21,10 @@ class PriceBar:
     """Daily OHLCV price record for a single symbol."""
     symbol: str
     day: date
-    open: float
-    high: float
-    low: float
-    close: float
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
     volume: int
     source: str
 
@@ -104,10 +105,10 @@ class YahooPriceProvider(PriceProvider):
                 PriceBar(
                     symbol=symbol,
                     day=day,
-                    open=float(row["Open"]),
-                    high=float(row["High"]),
-                    low=float(row["Low"]),
-                    close=float(row["Close"]),
+                    open=Decimal(str(row["Open"])),
+                    high=Decimal(str(row["High"])),
+                    low=Decimal(str(row["Low"])),
+                    close=Decimal(str(row["Close"])),
                     volume=int(row.get("Volume", 0)),
                     source="yfinance",
                 )
@@ -125,10 +126,10 @@ class YahooPriceProvider(PriceProvider):
                 PriceBar(
                     symbol=symbol,
                     day=day,
-                    open=float(row["Open"]),
-                    high=float(row["High"]),
-                    low=float(row["Low"]),
-                    close=float(row["Close"]),
+                    open=Decimal(str(row["Open"])),
+                    high=Decimal(str(row["High"])),
+                    low=Decimal(str(row["Low"])),
+                    close=Decimal(str(row["Close"])),
                     volume=int(row.get("Volume", 0)),
                     source="yfinance",
                 )
@@ -179,10 +180,10 @@ class YahooPriceProvider(PriceProvider):
                     PriceBar(
                         symbol=symbol,
                         day=row_day.date(),
-                        open=float(row["Open"]),
-                        high=float(row["High"]),
-                        low=float(row["Low"]),
-                        close=float(row["Close"]),
+                        open=Decimal(str(row["Open"])),
+                        high=Decimal(str(row["High"])),
+                        low=Decimal(str(row["Low"])),
+                        close=Decimal(str(row["Close"])),
                         volume=int(row.get("Volume", 0)),
                         source="yfinance",
                     )
@@ -202,10 +203,10 @@ class YahooPriceProvider(PriceProvider):
                     PriceBar(
                         symbol=symbol,
                         day=row_day.date(),
-                        open=float(row["Open"]),
-                        high=float(row["High"]),
-                        low=float(row["Low"]),
-                        close=float(row["Close"]),
+                        open=Decimal(str(row["Open"])),
+                        high=Decimal(str(row["High"])),
+                        low=Decimal(str(row["Low"])),
+                        close=Decimal(str(row["Close"])),
                         volume=int(row.get("Volume", 0)),
                         source="yfinance",
                     )
@@ -271,10 +272,10 @@ class SqlPriceBarRepository(PriceBarRepository):
                 PriceBar(
                     symbol=row.symbol,
                     day=row.day,
-                    open=float(row.open),
-                    high=float(row.high),
-                    low=float(row.low),
-                    close=float(row.close),
+                    open=Decimal(str(row.open)),
+                    high=Decimal(str(row.high)),
+                    low=Decimal(str(row.low)),
+                    close=Decimal(str(row.close)),
                     volume=int(row.volume),
                     source=row.source,
                 )
@@ -290,3 +291,4 @@ def _normalize_symbols(symbols: list[str]) -> list[str]:
 
 def _is_trading_day(day: date) -> bool:
     return day.weekday() < 5
+

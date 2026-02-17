@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Protocol
+from decimal import Decimal
 
 from .portfolio import PortfolioSnapshot
 from .pricing import PriceBar
@@ -21,9 +22,9 @@ class Signal:
     """Decision output from a strategy for a single symbol."""
     symbol: str
     action: SignalAction
-    quantity: float
+    quantity: Decimal
     reason: str
-    confidence: float
+    confidence: Decimal
     strategy_name: str
     created_at: datetime
 
@@ -82,7 +83,7 @@ class SimpleMovingAverageStrategy:
     ) -> list[Signal]:
         short_window = int(params.get("short_window", 5))
         long_window = int(params.get("long_window", 20))
-        trade_quantity = float(params.get("trade_quantity", 1.0))
+        trade_quantity = Decimal(str(params.get("trade_quantity", "1")))
 
         if short_window <= 0 or long_window <= 0:
             raise ValueError("short_window and long_window must be positive")
@@ -107,12 +108,12 @@ class SimpleMovingAverageStrategy:
                     Signal(
                         symbol=symbol,
                         action=SignalAction.HOLD,
-                        quantity=0.0,
+                        quantity=Decimal("0"),
                         reason=(
                             f"Not enough history for SMA crossover "
                             f"({len(closes)}/{long_window} bars)"
                         ),
-                        confidence=0.0,
+                        confidence=Decimal("0"),
                         strategy_name=self.name,
                         created_at=created_at,
                     )
@@ -125,11 +126,11 @@ class SimpleMovingAverageStrategy:
             curr_long = _sma(closes, long_window)
 
             action = SignalAction.HOLD
-            quantity = 0.0
+            quantity = Decimal("0")
             reason = "No crossover signal"
 
             position = portfolio.positions.get(symbol)
-            current_quantity = position.quantity if position else 0.0
+            current_quantity = position.quantity if position else Decimal("0")
 
             crossed_up = prev_short <= prev_long and curr_short > curr_long
             crossed_down = prev_short >= prev_long and curr_short < curr_long
@@ -161,15 +162,15 @@ class SimpleMovingAverageStrategy:
         return sorted(signals, key=lambda signal: signal.symbol)
 
 
-def _sma(values: list[float], window: int) -> float:
+def _sma(values: list[Decimal], window: int) -> Decimal:
     if len(values) < window:
         raise ValueError("Insufficient values for SMA calculation")
     segment = values[-window:]
     return sum(segment) / window
 
 
-def _confidence_from_spread(short_sma: float, long_sma: float) -> float:
+def _confidence_from_spread(short_sma: Decimal, long_sma: Decimal) -> Decimal:
     if long_sma == 0:
-        return 0.0
+        return Decimal("0")
     spread_ratio = abs(short_sma - long_sma) / abs(long_sma)
-    return min(1.0, spread_ratio)
+    return min(Decimal("1"), spread_ratio)

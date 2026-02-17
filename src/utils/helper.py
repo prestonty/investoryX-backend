@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from decimal import Decimal, ROUND_HALF_UP
+from numbers import Real
 
 
 def dataframeToJson(df: pd.DataFrame) -> list[dict]:
@@ -25,13 +26,13 @@ def dataframeToJson(df: pd.DataFrame) -> list[dict]:
 def round_2_decimals(x):
     if x is None:
         return None
-    return float(Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 def format_number(value, prefix="", suffix="", decimal_places=2):
     if value is None or value == 'N/A':
         return "N/A"
     try:
-        if isinstance(value, (int, float)):
+        if isinstance(value, (Real, Decimal)):
             if decimal_places == 0:
                 return f"{prefix}{value:,}{suffix}"
             else:

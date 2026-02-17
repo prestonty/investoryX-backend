@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from decimal import Decimal
 from pydantic import BaseModel
 from sqlalchemy import case, or_
 
@@ -43,9 +44,9 @@ class WatchlistQuoteItem(BaseModel):
     user_id: int
     ticker: str
     company_name: str
-    stockPrice: Optional[float] = None
-    priceChange: Optional[float] = None
-    priceChangePercent: Optional[float] = None
+    stockPrice: Optional[Decimal] = None
+    priceChange: Optional[Decimal] = None
+    priceChangePercent: Optional[Decimal] = None
     error: Optional[str] = None
 
 

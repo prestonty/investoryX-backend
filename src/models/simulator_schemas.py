@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional, Literal
 
 from pydantic import BaseModel
@@ -6,15 +7,15 @@ from pydantic import BaseModel
 
 class SimulatorCreate(BaseModel):
     name: str
-    starting_cash: float
+    starting_cash: Decimal
 
 
 class SimulatorResponse(BaseModel):
     simulator_id: int
     user_id: Optional[int]
     name: str
-    starting_cash: float
-    cash_balance: float
+    starting_cash: Decimal
+    cash_balance: Decimal
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     tickers: List[str] = []
@@ -29,7 +30,7 @@ class SimulatorRenameRequest(BaseModel):
 
 class SimulatorTrackedStockCreate(BaseModel):
     ticker: str
-    target_allocation: float
+    target_allocation: Decimal
     enabled: Optional[bool] = True
 
 
@@ -37,7 +38,7 @@ class SimulatorTrackedStockResponse(BaseModel):
     tracked_id: int
     simulator_id: int
     ticker: str
-    target_allocation: float
+    target_allocation: Decimal
     enabled: bool
 
     class Config:
@@ -48,8 +49,8 @@ class SimulatorPositionResponse(BaseModel):
     position_id: int
     simulator_id: int
     ticker: str
-    shares: float
-    avg_cost: float
+    shares: Decimal
+    avg_cost: Decimal
 
     class Config:
         from_attributes = True
@@ -60,9 +61,9 @@ class SimulatorTradeResponse(BaseModel):
     simulator_id: int
     ticker: str
     side: str
-    price: float
-    shares: float
-    fee: float
+    price: Decimal
+    shares: Decimal
+    fee: Decimal
     executed_at: Optional[datetime]
 
     class Config:
@@ -72,9 +73,9 @@ class SimulatorTradeResponse(BaseModel):
 class SimulatorCashLedgerResponse(BaseModel):
     ledger_id: int
     simulator_id: int
-    delta: float
+    delta: Decimal
     reason: str
-    balance_after: float
+    balance_after: Decimal
     created_at: Optional[datetime]
 
     class Config:
@@ -96,7 +97,7 @@ class MessageResponse(BaseModel):
 class SimulatorRunResponse(BaseModel):
     message: str
     trades_executed: int
-    cash_balance: float
+    cash_balance: Decimal
     price_mode: str
     frequency: str
 

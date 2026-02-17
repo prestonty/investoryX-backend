@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 from celery import shared_task
 from sqlalchemy import select
@@ -143,14 +144,14 @@ def load_portfolio_snapshot(simulator_id: int) -> PortfolioSnapshot:
                 continue
             positions[symbol] = Position(
                 symbol=symbol,
-                quantity=float(simulator_position.shares),
-                average_cost=float(simulator_position.avg_cost),
+                quantity=Decimal(str(simulator_position.shares)),
+                average_cost=Decimal(str(simulator_position.avg_cost)),
             )
 
         as_of = simulator.updated_at or datetime.now(timezone.utc)
         return PortfolioSnapshot(
             user_id=int(simulator.user_id),
-            cash=float(simulator.cash_balance),
+            cash=Decimal(str(simulator.cash_balance)),
             positions=positions,
             as_of=as_of,
         )
@@ -201,10 +202,10 @@ def load_price_history_for_portfolio(
             PriceBar(
                 symbol=row.symbol,
                 day=row.day,
-                open=float(row.open),
-                high=float(row.high),
-                low=float(row.low),
-                close=float(row.close),
+                open=Decimal(str(row.open)),
+                high=Decimal(str(row.high)),
+                low=Decimal(str(row.low)),
+                close=Decimal(str(row.close)),
                 volume=int(row.volume),
                 source=row.source,
             )
@@ -245,7 +246,7 @@ def validate_signal_batch(signals: list[Signal]) -> list[Signal]:
     for signal in signals:
         if signal.action.value not in valid_actions:
             continue
-        if signal.quantity < 0:
+        if signal.quantity < Decimal("0"):
             continue
         symbol = signal.symbol.strip().upper()
         if not symbol:

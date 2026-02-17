@@ -11,10 +11,10 @@ from .strategy import Signal, SignalAction
 @dataclass(frozen=True)
 class ExecutionRules:
     """Risk and cost constraints applied during paper execution."""
-    max_position_pct: float
-    max_order_value: float
-    fee_per_trade: float
-    slippage_bps: float
+    max_position_pct: Decimal
+    max_order_value: Decimal
+    fee_per_trade: Decimal
+    slippage_bps: Decimal
 
 
 @dataclass(frozen=True)
@@ -22,9 +22,9 @@ class Trade:
     """Executed paper trade derived from a signal."""
     symbol: str
     side: SignalAction
-    quantity: float
-    price: float
-    fee: float
+    quantity: Decimal
+    price: Decimal
+    fee: Decimal
     executed_at: datetime
     strategy_name: str
 
@@ -36,7 +36,7 @@ class ExecutionService:
         signals: list[Signal],
         portfolio: PortfolioSnapshot,
         rules: ExecutionRules,
-        prices: dict[str, float],
+        prices: dict[str, Decimal],
     ) -> list[Trade]:
         raise NotImplementedError
 

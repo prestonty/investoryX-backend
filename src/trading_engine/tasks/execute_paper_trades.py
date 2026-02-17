@@ -20,9 +20,11 @@ from src.trading_engine.services.strategy import SignalAction
 def record_paper_trades(
     simulator_id: int | None = None,
     limit: int = 500,
-    slippage_bps: float = 0.0,
-    fee_per_trade: float = 0.0,
+    slippage_bps: str | Decimal = "0",
+    fee_per_trade: str | Decimal = "0",
 ) -> ExecutionSummary:
+    # Celery/JSON boundaries should pass financial inputs as strings.
+    # We normalize to Decimal immediately inside execute_signals().
     return execute_signals(
         simulator_id=simulator_id,
         limit=limit,
@@ -34,11 +36,15 @@ def record_paper_trades(
 def execute_signals(
     simulator_id: int | None = None,
     limit: int = 500,
-    slippage_bps: float = 0.0,
-    fee_per_trade: float = 0.0,
+    slippage_bps: str | Decimal = "0",
+    fee_per_trade: str | Decimal = "0",
 ) -> ExecutionSummary:
     session = SessionLocal()
     try:
+        # Convert at the boundary once, then keep all internal math in Decimal.
+        slippage_bps_decimal = Decimal(str(slippage_bps))
+        fee_per_trade_decimal = Decimal(str(fee_per_trade))
+
         pending = _load_pending_signals(session=session, simulator_id=simulator_id, limit=limit)
         if not pending:
             return ExecutionSummary(
@@ -93,7 +99,7 @@ def execute_signals(
                 intent=intent,
                 cash=current_cash,
                 held_shares=current_holding,
-                fee=Decimal(str(fee_per_trade)),
+                fee=fee_per_trade_decimal,
             )
             if qty_error:
                 signal.status = "failed"
@@ -106,7 +112,7 @@ def execute_signals(
                 intent=intent,
                 cash=current_cash,
                 held_shares=current_holding,
-                fee=Decimal(str(fee_per_trade)),
+                fee=fee_per_trade_decimal,
             )
             if risk_error:
                 signal.status = "failed"
@@ -118,9 +124,9 @@ def execute_signals(
             fill_price = _estimate_fill_price(
                 side=intent.side,
                 market_price=intent.reference_price,
-                slippage_bps=slippage_bps,
+                slippage_bps=slippage_bps_decimal,
             )
-            fee = _calculate_fee(fee_per_trade)
+            fee = _calculate_fee(fee_per_trade_decimal)
             trade = _to_trade(
                 simulator_id=sim_id,
                 symbol=symbol,
@@ -264,18 +270,18 @@ def _apply_risk_rules(
 def _estimate_fill_price(
     side: SignalAction,
     market_price: Decimal,
-    slippage_bps: float,
+    slippage_bps: Decimal,
 ) -> Decimal:
-    if slippage_bps <= 0:
+    if slippage_bps <= Decimal("0"):
         return market_price
-    bps = Decimal(str(slippage_bps)) / Decimal("10000")
+    bps = slippage_bps / Decimal("10000")
     if side is SignalAction.BUY:
         return market_price * (Decimal("1") + bps)
     return market_price * (Decimal("1") - bps)
 
 
-def _calculate_fee(fee_per_trade: float) -> Decimal:
-    return Decimal(str(fee_per_trade))
+def _calculate_fee(fee_per_trade: Decimal) -> Decimal:
+    return fee_per_trade
 
 
 def _size_executable_quantity(
@@ -310,6 +316,7 @@ def _to_trade(
     fee: Decimal,
     executed_at: datetime,
 ) -> SimulatorTrade:
+    # DB stores action as string, so serialize enum value at write time.
     return SimulatorTrade(
         simulator_id=simulator_id,
         ticker=symbol,

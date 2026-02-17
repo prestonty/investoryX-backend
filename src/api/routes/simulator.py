@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from typing import List
+from decimal import Decimal
 
 from src.api.database.database import get_db
 from src.api.auth.auth import get_current_active_user
@@ -225,13 +226,13 @@ def run_simulator(
         return SimulatorRunResponse(
             message="No tracked stocks to evaluate",
             trades_executed=0,
-            cash_balance=float(simulator.cash_balance),
+            cash_balance=Decimal(str(simulator.cash_balance)),
         )
 
     price_mode = payload.price_mode
     frequency = payload.frequency
 
-    fee_rate = 0.001
+    fee_rate = Decimal("0.001")
     trades_executed = 0
 
     for tracked in tracked_stocks:
@@ -249,7 +250,7 @@ def run_simulator(
         price = latest.get(price_key)
         if price is None:
             continue
-        current_price = float(price)
+        current_price = Decimal(str(price))
         if current_price <= 0:
             continue
 
@@ -262,23 +263,23 @@ def run_simulator(
             .first()
         )
 
-        if not position or float(position.shares) <= 0:
+        if not position or Decimal(str(position.shares)) <= Decimal("0"):
             desired_investment = (
-                float(simulator.starting_cash)
-                * float(tracked.target_allocation)
-                / 100.0
+                Decimal(str(simulator.starting_cash))
+                * Decimal(str(tracked.target_allocation))
+                / Decimal("100")
             )
-            available_cash = float(simulator.cash_balance)
+            available_cash = Decimal(str(simulator.cash_balance))
             buy_amount = min(desired_investment, available_cash)
             if buy_amount <= 0:
                 continue
 
-            total_cost = buy_amount * (1 + fee_rate)
+            total_cost = buy_amount * (Decimal("1") + fee_rate)
             if total_cost > available_cash:
-                buy_amount = available_cash / (1 + fee_rate)
+                buy_amount = available_cash / (Decimal("1") + fee_rate)
                 if buy_amount <= 0:
                     continue
-                total_cost = buy_amount * (1 + fee_rate)
+                total_cost = buy_amount * (Decimal("1") + fee_rate)
 
             shares = buy_amount / current_price
             fee = buy_amount * fee_rate
@@ -291,7 +292,7 @@ def run_simulator(
             )
             db.add(position)
 
-            simulator.cash_balance = float(simulator.cash_balance) - total_cost
+            simulator.cash_balance = Decimal(str(simulator.cash_balance)) - total_cost
             db.add(
                 SimulatorTrade(
                     simulator_id=simulator_id,
@@ -313,21 +314,21 @@ def run_simulator(
             trades_executed += 1
             continue
 
-        avg_cost = float(position.avg_cost)
+        avg_cost = Decimal(str(position.avg_cost))
         if avg_cost <= 0:
             continue
 
         pct_change = (current_price - avg_cost) / avg_cost
-        should_sell = pct_change >= 0.05 or pct_change <= -0.05
+        should_sell = pct_change >= Decimal("0.05") or pct_change <= Decimal("-0.05")
         if not should_sell:
             continue
 
-        shares = float(position.shares)
+        shares = Decimal(str(position.shares))
         proceeds = shares * current_price
         fee = proceeds * fee_rate
         net = proceeds - fee
 
-        simulator.cash_balance = float(simulator.cash_balance) + net
+        simulator.cash_balance = Decimal(str(simulator.cash_balance)) + net
         db.add(
             SimulatorTrade(
                 simulator_id=simulator_id,
@@ -347,8 +348,8 @@ def run_simulator(
             )
         )
 
-        position.shares = 0
-        position.avg_cost = 0
+        position.shares = Decimal("0")
+        position.avg_cost = Decimal("0")
         trades_executed += 1
 
     db.commit()
@@ -357,7 +358,7 @@ def run_simulator(
     return SimulatorRunResponse(
         message="Simulator run completed",
         trades_executed=trades_executed,
-        cash_balance=float(simulator.cash_balance),
+        cash_balance=Decimal(str(simulator.cash_balance)),
         price_mode=price_mode,
         frequency=frequency,
     )

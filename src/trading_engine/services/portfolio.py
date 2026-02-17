@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 
 from typing import TYPE_CHECKING
@@ -14,15 +15,15 @@ if TYPE_CHECKING:
 class Position:
     """Holding for a single symbol in a portfolio."""
     symbol: str
-    quantity: float
-    average_cost: float
+    quantity: Decimal
+    average_cost: Decimal
 
 
 @dataclass(frozen=True)
 class PortfolioSnapshot:
     """Point-in-time view of a portfolio."""
     user_id: int
-    cash: float
+    cash: Decimal
     positions: dict[str, Position]
     as_of: datetime
 
