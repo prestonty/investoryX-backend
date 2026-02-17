@@ -15,6 +15,7 @@ from src.trading_engine.services.portfolio import PortfolioSnapshot, Position
 from src.trading_engine.services.pricing import PriceBar
 from src.trading_engine.services.strategy import (
     Signal,
+    SignalAction,
     SimpleMovingAverageStrategy,
     StrategyRegistry,
     StrategyService,
@@ -239,10 +240,10 @@ def evaluate_portfolio_strategies(
 
 def validate_signal_batch(signals: list[Signal]) -> list[Signal]:
     # Basic guardrails before persistence/execution.
-    valid_actions = {"buy", "sell", "hold"}
+    valid_actions = {action.value for action in SignalAction}
     cleaned: list[Signal] = []
     for signal in signals:
-        if signal.action not in valid_actions:
+        if signal.action.value not in valid_actions:
             continue
         if signal.quantity < 0:
             continue
@@ -267,7 +268,7 @@ def persist_signals(simulator_id: int, signals: list[Signal]) -> list[SimulatorS
             row = SimulatorSignal(
                 simulator_id=simulator_id,
                 ticker=signal.symbol.strip().upper(),
-                action=signal.action,
+                action=signal.action.value,
                 quantity=signal.quantity,
                 reason=signal.reason,
                 confidence=signal.confidence,

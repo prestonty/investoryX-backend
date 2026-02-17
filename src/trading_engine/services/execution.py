@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 from .portfolio import PortfolioSnapshot
-from .strategy import Signal
+from .strategy import Signal, SignalAction
 
 
 @dataclass(frozen=True)
@@ -20,7 +21,7 @@ class ExecutionRules:
 class Trade:
     """Executed paper trade derived from a signal."""
     symbol: str
-    side: str  # buy | sell
+    side: SignalAction
     quantity: float
     price: float
     fee: float
@@ -38,3 +39,21 @@ class ExecutionService:
         prices: dict[str, float],
     ) -> list[Trade]:
         raise NotImplementedError
+
+@dataclass(frozen=True)
+class ExecutionSummary:
+    processed: int
+    executed: int
+    skipped: int
+    failed: int
+    trades_created: int
+
+@dataclass(frozen=True)
+class TradeIntent:
+    signal_id: int
+    simulator_id: int
+    symbol: str
+    side: SignalAction
+    quantity: Decimal
+    reference_price: Decimal
+    strategy_name: str | None = None

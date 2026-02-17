@@ -3,17 +3,24 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum
 from typing import Protocol
 
 from .portfolio import PortfolioSnapshot
 from .pricing import PriceBar
 
 
+class SignalAction(str, Enum):
+    BUY = "buy"
+    SELL = "sell"
+    HOLD = "hold"
+
+
 @dataclass(frozen=True)
 class Signal:
     """Decision output from a strategy for a single symbol."""
     symbol: str
-    action: str  # buy | sell | hold
+    action: SignalAction
     quantity: float
     reason: str
     confidence: float
@@ -99,7 +106,7 @@ class SimpleMovingAverageStrategy:
                 signals.append(
                     Signal(
                         symbol=symbol,
-                        action="hold",
+                        action=SignalAction.HOLD,
                         quantity=0.0,
                         reason=(
                             f"Not enough history for SMA crossover "
@@ -117,7 +124,7 @@ class SimpleMovingAverageStrategy:
             curr_short = _sma(closes, short_window)
             curr_long = _sma(closes, long_window)
 
-            action = "hold"
+            action = SignalAction.HOLD
             quantity = 0.0
             reason = "No crossover signal"
 
@@ -128,11 +135,11 @@ class SimpleMovingAverageStrategy:
             crossed_down = prev_short >= prev_long and curr_short < curr_long
 
             if crossed_up:
-                action = "buy"
+                action = SignalAction.BUY
                 quantity = trade_quantity
                 reason = "Short SMA crossed above long SMA"
             elif crossed_down and current_quantity > 0:
-                action = "sell"
+                action = SignalAction.SELL
                 quantity = min(trade_quantity, current_quantity)
                 reason = "Short SMA crossed below long SMA"
             elif crossed_down and current_quantity <= 0:
