@@ -2,27 +2,12 @@ from __future__ import annotations
 from datetime import date
 from celery import shared_task
 
-from sqlalchemy import select
-from src.api.database.database import SessionLocal
-from src.models.simulator_tracked_stock import SimulatorTrackedStock
 from src.trading_engine.services.pricing import (
+    get_all_enabled_simulator_tickers,
     PricingService,
     SqlPriceBarRepository,
     YahooPriceProvider,
 )
-
-def _get_all_simulator_tickers() -> list[str]:
-    session = SessionLocal()
-    try:
-        stmt = select(SimulatorTrackedStock.ticker).where(
-            SimulatorTrackedStock.enabled.is_(True)
-        )
-        rows = session.execute(stmt).scalars().all()
-        tickers = {ticker.strip().upper() for ticker in rows if ticker and ticker.strip()}
-        return tickers
-    finally:
-        session.close()
-
 
 @shared_task(name="trading_engine.fetch_prices")
 def fetch_prices(tickers: list[str] | None = None, day: str | None = None) -> int:
@@ -34,7 +19,7 @@ def fetch_prices(tickers: list[str] | None = None, day: str | None = None) -> in
     """
     service = PricingService(provider=YahooPriceProvider(), repo=SqlPriceBarRepository())
     if not tickers:
-        tickers = _get_all_simulator_tickers()
+        tickers = get_all_enabled_simulator_tickers()
     if not day:
         day = date.today().isoformat()
     return service.fetch_and_store_daily_bars(
@@ -54,9 +39,8 @@ def backfill_prices(
     Dates are ISO strings (YYYY-MM-DD).
     """
 
-    # Dont think this is needed
-    # if not tickers:
-    #     tickers = _get_all_simulator_tickers()
+    if not tickers:
+        tickers = get_all_enabled_simulator_tickers()
     if not start_day or not end_day:
         raise ValueError("start_day and end_day are required for backfill_prices")
     provider = YahooPriceProvider()

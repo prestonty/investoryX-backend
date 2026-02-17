@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from src.api.database.database import SessionLocal
 from src.models.price_bar import PriceBar as PriceBarModel
+from src.models.simulator_tracked_stock import SimulatorTrackedStock
 
 logger = logging.getLogger("investoryx.trading_engine.pricing")
 
@@ -63,6 +64,23 @@ class PricingService:
 
     def get_latest_bars(self, symbols: list[str], day: date) -> list[PriceBar]:
         return self._repo.get_latest_bars(symbols, day)
+
+
+def get_all_enabled_simulator_tickers() -> list[str]:
+    session = SessionLocal()
+    try:
+        stmt = select(SimulatorTrackedStock.ticker).where(
+            SimulatorTrackedStock.enabled.is_(True)
+        )
+        rows = session.execute(stmt).scalars().all()
+        tickers = {
+            ticker.strip().upper()
+            for ticker in rows
+            if ticker and ticker.strip()
+        }
+        return sorted(tickers)
+    finally:
+        session.close()
 
 
 class YahooPriceProvider(PriceProvider):
