@@ -25,6 +25,7 @@ def evaluate_strategies(
     user_id: int | None = None,
     params: dict | None = None,
 ) -> dict:
+    # Orchestrates one evaluation run across eligible simulators.
     params = params or {}
     targets = load_target_portfolios(user_id)
     strategy_registry = build_strategy_registry()
@@ -39,9 +40,11 @@ def evaluate_strategies(
     for simulator in targets:
         simulator_id = int(simulator.simulator_id)
         try:
+            # Build inputs required by strategy evaluation.
             snapshot = load_portfolio_snapshot(simulator_id)
             prices = load_price_history_for_portfolio(simulator_id, params)
             if not prices:
+                # Skip simulators that do not yet have enough price data.
                 skipped += 1
                 simulator_results.append(
                     {
@@ -69,6 +72,7 @@ def evaluate_strategies(
                 }
             )
         except Exception as exc:
+            # Capture per-simulator failures so one error does not stop the run.
             errors += 1
             simulator_results.append(
                 {
@@ -90,6 +94,7 @@ def evaluate_strategies(
 
 
 def load_target_portfolios(user_id: int | None = None) -> list[Simulator]:
+    # Select simulators that have at least one enabled tracked stock.
     session = SessionLocal()
     try:
         stmt = (
@@ -103,6 +108,7 @@ def load_target_portfolios(user_id: int | None = None) -> list[Simulator]:
             .order_by(Simulator.simulator_id)
         )
         if user_id is not None:
+            # Optional scoping for manual/debug runs.
             stmt = stmt.where(Simulator.user_id == user_id)
             simulators = session.execute(stmt).scalars().all()
         return simulators
@@ -111,6 +117,7 @@ def load_target_portfolios(user_id: int | None = None) -> list[Simulator]:
 
 
 def load_portfolio_snapshot(simulator_id: int) -> PortfolioSnapshot:
+    # Converts simulator + positions DB rows into a service-level snapshot model.
     session = SessionLocal()
     try:
         stmt = select(Simulator).where(Simulator.simulator_id == simulator_id)
@@ -153,6 +160,7 @@ def load_price_history_for_portfolio(
     simulator_id: int,
     params: dict,
 ) -> list[PriceBar]:
+    # Load price bars from DB for tickers enabled on this simulator.
     session = SessionLocal()
     try:
         tracked_stmt = (
@@ -172,6 +180,7 @@ def load_price_history_for_portfolio(
         if not tickers:
             return []
 
+        # Include a small buffer to reduce chance of missing market days/holidays.
         long_window = int(params.get("long_window", 20))
         buffer_days = int(params.get("buffer_days", 10))
         end_day = date.today()
@@ -204,8 +213,9 @@ def load_price_history_for_portfolio(
 
 
 def build_strategy_registry() -> StrategyRegistry:
+    # Central place to register available strategies.
     registry = StrategyRegistry()
-    registry.register(SimpleMovingAverageStrategy()) # default to using SMA
+    registry.register(SimpleMovingAverageStrategy())
     return registry
 
 
@@ -216,6 +226,7 @@ def evaluate_portfolio_strategies(
     portfolio_snapshot: PortfolioSnapshot,
     params: dict,
 ) -> list[Signal]:
+    # Evaluate one strategy and then keep only structurally valid signals.
     signals = strategy_service.evaluate(
         strategy_name=strategy_name,
         prices=prices,
@@ -226,6 +237,7 @@ def evaluate_portfolio_strategies(
 
 
 def validate_signal_batch(signals: list[Signal]) -> list[Signal]:
+    # Basic guardrails before persistence/execution.
     valid_actions = {"buy", "sell", "hold"}
     cleaned: list[Signal] = []
     for signal in signals:
@@ -267,6 +279,7 @@ def build_evaluation_summary(
     errors: int,
     simulator_results: list[dict],
 ) -> dict:
+    # Uniform task output for logs, debugging, and UI monitoring.
     return {
         "user_id": user_id,
         "strategy_name": strategy_name,
