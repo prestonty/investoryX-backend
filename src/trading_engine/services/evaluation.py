@@ -13,12 +13,12 @@ from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
 
+from .actions import SignalAction
 from .execution import SignalExecutionStatus
 from .portfolio import PortfolioSnapshot, Position
 from .pricing import PriceBar
 from .strategy import (
     Signal,
-    SignalAction,
     SimpleMovingAverageStrategy,
     StrategyRegistry,
     StrategyService,

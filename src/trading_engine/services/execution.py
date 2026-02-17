@@ -14,8 +14,9 @@ from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_trade import SimulatorTrade
 
+from .actions import SignalAction
 from .portfolio import PortfolioSnapshot
-from .strategy import Signal, SignalAction
+from .strategy import Signal
 
 
 class SignalExecutionStatus(str, Enum):

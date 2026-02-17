@@ -3,18 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
 from typing import Protocol
 from decimal import Decimal
 
+from .actions import SignalAction
 from .portfolio import PortfolioSnapshot
 from .pricing import PriceBar
-
-
-class SignalAction(str, Enum):
-    BUY = "buy"
-    SELL = "sell"
-    HOLD = "hold"
 
 
 @dataclass(frozen=True)
