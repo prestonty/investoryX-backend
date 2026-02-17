@@ -3,9 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 
 from .portfolio import PortfolioSnapshot
 from .strategy import Signal, SignalAction
+
+
+class SignalExecutionStatus(str, Enum):
+    PENDING = "pending"
+    EXECUTED = "executed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
+
+
+class SignalOutcome(str, Enum):
+    EXECUTED = "executed"
+    SKIPPED = "skipped"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True)
