@@ -103,6 +103,8 @@ Paper-trading engine for InvestoryX. This module will run scheduled jobs that fe
 ## Scheduling
 - Use Celery Beat to trigger daily jobs (e.g., after market close)
 - Keep scheduling config centralized in `schedules`
+- Execute pipeline tasks in this order: `fetch_prices` -> `evaluate_strategies` -> `execute_paper_trades` -> `reconcile_portfolios`
+- Keep a small time gap between each scheduled step to reduce overlap risk and preserve deterministic state transitions
 
 ## Notes
 - This module is intentionally framework-agnostic for now and will be wired into the main backend once the pipeline is defined.
