@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from decimal import Decimal
 
 from celery import shared_task
@@ -17,13 +18,14 @@ def record_paper_trades(
     limit: int = 500,
     slippage_bps: str | Decimal = "0",
     fee_per_trade: str | Decimal = "0",
-) -> ExecutionSummary:
-    return execute_signals(
+) -> dict:
+    summary = execute_signals(
         simulator_id=simulator_id,
         limit=limit,
         slippage_bps=slippage_bps,
         fee_per_trade=fee_per_trade,
     )
+    return asdict(summary)
 
 
 def execute_signals(
