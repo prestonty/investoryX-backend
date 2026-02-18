@@ -49,6 +49,13 @@ class SimulatorRenameRequest(BaseModel):
     name: str
 
 
+class SimulatorSettingsUpdateRequest(BaseModel):
+    frequency: Optional[SimulatorFrequency] = None
+    price_mode: Optional[SimulatorPriceMode] = None
+    max_position_pct: Optional[Decimal] = None
+    max_daily_loss_pct: Optional[Decimal] = None
+
+
 class SimulatorTrackedStockCreate(BaseModel):
     ticker: str
     target_allocation: Decimal

@@ -19,6 +19,7 @@ from src.models.simulator_schemas import (
     SimulatorCreate,
     SimulatorResponse,
     SimulatorRenameRequest,
+    SimulatorSettingsUpdateRequest,
     SimulatorTrackedStockCreate,
     SimulatorTrackedStockResponse,
     SimulatorSummaryResponse,
@@ -92,6 +93,33 @@ def rename_simulator(
     db.commit()
     db.refresh(simulator)
     return SimulatorResponse.model_validate(simulator)
+
+
+@router.patch("/{simulator_id}/settings", response_model=SimulatorResponse)
+def update_simulator_settings(
+    simulator_id: int,
+    payload: SimulatorSettingsUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user),
+):
+    simulator = get_user_simulator(db, simulator_id, current_user.user_id)
+    if not simulator:
+        raise HTTPException(status_code=404, detail="Simulator not found")
+
+    if "frequency" in payload.model_fields_set and payload.frequency is not None:
+        simulator.frequency = payload.frequency
+    if "price_mode" in payload.model_fields_set and payload.price_mode is not None:
+        simulator.price_mode = payload.price_mode
+    if "max_position_pct" in payload.model_fields_set:
+        simulator.max_position_pct = payload.max_position_pct
+    if "max_daily_loss_pct" in payload.model_fields_set:
+        simulator.max_daily_loss_pct = payload.max_daily_loss_pct
+
+    db.add(simulator)
+    db.commit()
+    db.refresh(simulator)
+    return SimulatorResponse.model_validate(simulator)
+
 
 @router.get("/", response_model=List[SimulatorResponse])
 def list_simulators(
@@ -227,6 +255,11 @@ def run_simulator(
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
 
+    price_mode = payload.price_mode or simulator.price_mode
+    frequency = payload.frequency or simulator.frequency
+    simulator.price_mode = price_mode
+    simulator.frequency = frequency
+
     tracked_stocks = (
         db.query(SimulatorTrackedStock)
         .filter(
@@ -238,16 +271,16 @@ def run_simulator(
     )
 
     if not tracked_stocks:
+        db.add(simulator)
+        db.commit()
+        db.refresh(simulator)
         return SimulatorRunResponse(
             message="No tracked stocks to evaluate",
             trades_executed=0,
             cash_balance=Decimal(str(simulator.cash_balance)),
+            price_mode=price_mode,
+            frequency=frequency,
         )
-
-    price_mode = payload.price_mode or simulator.price_mode
-    frequency = payload.frequency or simulator.frequency
-    simulator.price_mode = price_mode
-    simulator.frequency = frequency
 
     fee_rate = Decimal("0.001")
     trades_executed = 0
