@@ -4,10 +4,23 @@ from typing import List, Optional, Literal
 
 from pydantic import BaseModel
 
+SIMULATOR_STATUS_ACTIVE = "Active Trading"
+SimulatorStatus = Literal["Active Trading", "Pause Trading"]
+SIMULATOR_FREQUENCY_DAILY = "daily"
+SIMULATOR_PRICE_MODE_CLOSE = "close"
+SimulatorFrequency = Literal["daily", "twice_daily"]
+SimulatorPriceMode = Literal["open", "close"]
+
 
 class SimulatorCreate(BaseModel):
     name: str
     starting_cash: Decimal
+    status: SimulatorStatus = SIMULATOR_STATUS_ACTIVE
+    frequency: SimulatorFrequency = SIMULATOR_FREQUENCY_DAILY
+    price_mode: SimulatorPriceMode = SIMULATOR_PRICE_MODE_CLOSE
+    max_position_pct: Optional[Decimal] = None
+    max_daily_loss_pct: Optional[Decimal] = None
+    stopped_reason: Optional[str] = None
 
 
 class SimulatorResponse(BaseModel):
@@ -16,6 +29,14 @@ class SimulatorResponse(BaseModel):
     name: str
     starting_cash: Decimal
     cash_balance: Decimal
+    status: SimulatorStatus
+    last_run_at: Optional[datetime]
+    next_run_at: Optional[datetime]
+    frequency: SimulatorFrequency
+    price_mode: SimulatorPriceMode
+    max_position_pct: Optional[Decimal]
+    max_daily_loss_pct: Optional[Decimal]
+    stopped_reason: Optional[str]
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     tickers: List[str] = []
@@ -98,10 +119,10 @@ class SimulatorRunResponse(BaseModel):
     message: str
     trades_executed: int
     cash_balance: Decimal
-    price_mode: str
-    frequency: str
+    price_mode: SimulatorPriceMode
+    frequency: SimulatorFrequency
 
 
 class SimulatorRunRequest(BaseModel):
-    price_mode: Literal["open", "close"] = "close"
-    frequency: Literal["daily", "twice_daily"] = "daily"
+    price_mode: Optional[SimulatorPriceMode] = None
+    frequency: Optional[SimulatorFrequency] = None

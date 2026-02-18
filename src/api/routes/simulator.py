@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from typing import List
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 
 from src.api.database.database import get_db
 from src.api.auth.auth import get_current_active_user
@@ -58,6 +59,12 @@ def create_simulator(
         name=payload.name,
         starting_cash=payload.starting_cash,
         cash_balance=payload.starting_cash,
+        status=payload.status,
+        frequency=payload.frequency,
+        price_mode=payload.price_mode,
+        max_position_pct=payload.max_position_pct,
+        max_daily_loss_pct=payload.max_daily_loss_pct,
+        stopped_reason=payload.stopped_reason,
         user_id=current_user.user_id,
     )
     db.add(simulator)
@@ -105,6 +112,14 @@ def list_simulators(
             name=s.name,
             starting_cash=s.starting_cash,
             cash_balance=s.cash_balance,
+            status=s.status,
+            last_run_at=s.last_run_at,
+            next_run_at=s.next_run_at,
+            frequency=s.frequency,
+            price_mode=s.price_mode,
+            max_position_pct=s.max_position_pct,
+            max_daily_loss_pct=s.max_daily_loss_pct,
+            stopped_reason=s.stopped_reason,
             created_at=s.created_at,
             updated_at=s.updated_at,
             tickers=[ts.ticker for ts in s.tracked_stocks],
@@ -229,8 +244,10 @@ def run_simulator(
             cash_balance=Decimal(str(simulator.cash_balance)),
         )
 
-    price_mode = payload.price_mode
-    frequency = payload.frequency
+    price_mode = payload.price_mode or simulator.price_mode
+    frequency = payload.frequency or simulator.frequency
+    simulator.price_mode = price_mode
+    simulator.frequency = frequency
 
     fee_rate = Decimal("0.001")
     trades_executed = 0
@@ -351,6 +368,14 @@ def run_simulator(
         position.shares = Decimal("0")
         position.avg_cost = Decimal("0")
         trades_executed += 1
+
+    now_utc = datetime.now(timezone.utc)
+    simulator.last_run_at = now_utc
+    simulator.next_run_at = (
+        now_utc + timedelta(hours=12)
+        if frequency == "twice_daily"
+        else now_utc + timedelta(days=1)
+    )
 
     db.commit()
     db.refresh(simulator)
