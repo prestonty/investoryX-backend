@@ -96,8 +96,9 @@ class SimpleMovingAverageStrategy:
         for symbol, symbol_bars in bars_by_symbol.items():
             sorted_bars = sorted(symbol_bars, key=lambda bar: bar.day)
             closes = [bar.close for bar in sorted_bars]
+            required_bars = long_window + 1
 
-            if len(closes) < long_window:
+            if len(closes) < required_bars:
                 signals.append(
                     Signal(
                         symbol=symbol,
@@ -105,7 +106,7 @@ class SimpleMovingAverageStrategy:
                         quantity=Decimal("0"),
                         reason=(
                             f"Not enough history for SMA crossover "
-                            f"({len(closes)}/{long_window} bars)"
+                            f"({len(closes)}/{required_bars} bars)"
                         ),
                         confidence=Decimal("0"),
                         strategy_name=self.name,
@@ -154,6 +155,22 @@ class SimpleMovingAverageStrategy:
             )
 
         return sorted(signals, key=lambda signal: signal.symbol)
+
+
+class Sma50x200CrossoverStrategy(SimpleMovingAverageStrategy):
+    """50/200-day SMA crossover strategy (golden/death cross)."""
+
+    name = "sma_50_200_crossover"
+
+    def generate_signals(
+        self,
+        prices: list[PriceBar],
+        portfolio: PortfolioSnapshot,
+        params: dict,
+    ) -> list[Signal]:
+        # Keep trade sizing and other params, but fix window lengths to 50/200.
+        strategy_params = {**params, "short_window": 50, "long_window": 200}
+        return super().generate_signals(prices, portfolio, strategy_params)
 
 
 def _sma(values: list[Decimal], window: int) -> Decimal:

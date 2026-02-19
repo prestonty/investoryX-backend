@@ -20,6 +20,7 @@ from .pricing import PriceBar
 from .strategy import (
     Signal,
     SimpleMovingAverageStrategy,
+    Sma50x200CrossoverStrategy,
     StrategyRegistry,
     StrategyService,
 )
@@ -128,7 +129,11 @@ class EvaluationService:
     ) -> SimulatorEvaluationResult:
         try:
             snapshot = self.load_portfolio_snapshot(simulator_id)
-            prices = self.load_price_history_for_portfolio(simulator_id, params)
+            prices = self.load_price_history_for_portfolio(
+                simulator_id,
+                params,
+                strategy_name,
+            )
             if not prices:
                 return self._build_skipped_result(simulator_id)
 
@@ -230,6 +235,7 @@ class EvaluationService:
         self,
         simulator_id: int,
         params: dict,
+        strategy_name: str,
     ) -> list[PriceBar]:
         session = SessionLocal()
         try:
@@ -250,8 +256,8 @@ class EvaluationService:
             if not tickers:
                 return []
 
-            long_window = int(params.get("long_window", 20))
-            buffer_days = int(params.get("buffer_days", 10))
+            long_window = self.resolve_long_window(params, strategy_name)
+            buffer_days = self.resolve_buffer_days(params, long_window)
             end_day = date.today()
             start_day = end_day - timedelta(days=long_window + buffer_days)
 
@@ -283,7 +289,29 @@ class EvaluationService:
     def build_strategy_registry(self) -> StrategyRegistry:
         registry = StrategyRegistry()
         registry.register(SimpleMovingAverageStrategy())
+        registry.register(Sma50x200CrossoverStrategy())
         return registry
+
+    def resolve_long_window(self, params: dict, strategy_name: str) -> int:
+        if "long_window" in params:
+            long_window = int(params["long_window"])
+        elif strategy_name == Sma50x200CrossoverStrategy.name:
+            long_window = 200
+        else:
+            long_window = 20
+        if long_window <= 0:
+            raise ValueError("long_window must be positive")
+        return long_window
+
+    def resolve_buffer_days(self, params: dict, long_window: int) -> int:
+        if "buffer_days" in params:
+            buffer_days = int(params["buffer_days"])
+        else:
+            # Calendar days contain weekends/holidays; widen history by default.
+            buffer_days = max(10, long_window)
+        if buffer_days < 0:
+            raise ValueError("buffer_days must be >= 0")
+        return buffer_days
 
     def evaluate_portfolio_strategies(
         self,

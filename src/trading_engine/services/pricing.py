@@ -113,45 +113,14 @@ class YahooPriceProvider(PriceProvider):
             return []
 
         bars: list[PriceBar] = []
-
-        if len(symbols) == 1:
-            symbol = symbols[0]
-            if data.empty:
-                return []
-            row = data.iloc[0]
-            bars.append(
-                PriceBar(
-                    symbol=symbol,
-                    day=day,
-                    open=Decimal(str(row["Open"])),
-                    high=Decimal(str(row["High"])),
-                    low=Decimal(str(row["Low"])),
-                    close=Decimal(str(row["Close"])),
-                    volume=int(row.get("Volume", 0)),
-                    source="yfinance",
-                )
-            )
-            return bars
-
         for symbol in symbols:
-            if symbol not in data.columns.get_level_values(0):
-                continue
-            frame = data[symbol]
+            frame = self._extract_symbol_frame(data, symbol)
             if frame.empty:
                 continue
             row = frame.iloc[0]
-            bars.append(
-                PriceBar(
-                    symbol=symbol,
-                    day=day,
-                    open=Decimal(str(row["Open"])),
-                    high=Decimal(str(row["High"])),
-                    low=Decimal(str(row["Low"])),
-                    close=Decimal(str(row["Close"])),
-                    volume=int(row.get("Volume", 0)),
-                    source="yfinance",
-                )
-            )
+            bar = self._build_bar(symbol=symbol, row_day=day, row=row)
+            if bar is not None:
+                bars.append(bar)
 
         return bars
 
@@ -187,50 +156,93 @@ class YahooPriceProvider(PriceProvider):
 
         bars: list[PriceBar] = []
 
-        if len(symbols) == 1:
-            symbol = symbols[0]
-            if data.empty:
-                return []
-            for row_day, row in data.iterrows():
-                if not _is_trading_day(row_day.date()):
-                    continue
-                bars.append(
-                    PriceBar(
-                        symbol=symbol,
-                        day=row_day.date(),
-                        open=Decimal(str(row["Open"])),
-                        high=Decimal(str(row["High"])),
-                        low=Decimal(str(row["Low"])),
-                        close=Decimal(str(row["Close"])),
-                        volume=int(row.get("Volume", 0)),
-                        source="yfinance",
-                    )
-                )
-            return bars
-
         for symbol in symbols:
-            if symbol not in data.columns.get_level_values(0):
-                continue
-            frame = data[symbol]
+            frame = self._extract_symbol_frame(data, symbol)
             if frame.empty:
                 continue
             for row_day, row in frame.iterrows():
-                if not _is_trading_day(row_day.date()):
+                day_value = row_day.date()
+                if not _is_trading_day(day_value):
                     continue
-                bars.append(
-                    PriceBar(
-                        symbol=symbol,
-                        day=row_day.date(),
-                        open=Decimal(str(row["Open"])),
-                        high=Decimal(str(row["High"])),
-                        low=Decimal(str(row["Low"])),
-                        close=Decimal(str(row["Close"])),
-                        volume=int(row.get("Volume", 0)),
-                        source="yfinance",
-                    )
-                )
+                bar = self._build_bar(symbol=symbol, row_day=day_value, row=row)
+                if bar is not None:
+                    bars.append(bar)
 
         return bars
+
+    def _extract_symbol_frame(self, data, symbol: str):
+        if data.empty:
+            return data
+
+        columns = data.columns
+        if getattr(columns, "nlevels", 1) == 1:
+            # Single ticker often returns flat columns: Open/High/Low/Close/Volume.
+            return data
+
+        level0 = {str(value) for value in columns.get_level_values(0)}
+        level1 = {str(value) for value in columns.get_level_values(1)}
+
+        if symbol in level0:
+            frame = data[symbol]
+        elif symbol in level1:
+            frame = data.xs(symbol, axis=1, level=1)
+        else:
+            return data.iloc[0:0]
+
+        return self._normalize_frame_columns(frame)
+
+    def _normalize_frame_columns(self, frame):
+        columns = frame.columns
+        if getattr(columns, "nlevels", 1) == 1:
+            return frame
+
+        normalized = frame.copy()
+        level0 = {str(value) for value in columns.get_level_values(0)}
+        level1 = {str(value) for value in columns.get_level_values(1)}
+
+        if "Open" in level0 and "Close" in level0:
+            normalized.columns = columns.get_level_values(0)
+            return normalized
+
+        if "Open" in level1 and "Close" in level1:
+            normalized.columns = columns.get_level_values(1)
+            return normalized
+
+        return normalized
+
+    def _build_bar(self, symbol: str, row_day: date, row) -> PriceBar | None:
+        required_columns = ("Open", "High", "Low", "Close")
+        if any(column not in row.index for column in required_columns):
+            logger.warning(
+                "Skipping bar for %s on %s due to missing OHLC columns: %s",
+                symbol,
+                row_day,
+                list(row.index),
+            )
+            return None
+
+        open_value = row["Open"]
+        high_value = row["High"]
+        low_value = row["Low"]
+        close_value = row["Close"]
+        volume_value = row.get("Volume", 0)
+
+        if any(str(value).lower() == "nan" for value in (open_value, high_value, low_value, close_value)):
+            return None
+
+        if str(volume_value).lower() == "nan":
+            volume_value = 0
+
+        return PriceBar(
+            symbol=symbol,
+            day=row_day,
+            open=Decimal(str(open_value)),
+            high=Decimal(str(high_value)),
+            low=Decimal(str(low_value)),
+            close=Decimal(str(close_value)),
+            volume=int(volume_value),
+            source="yfinance",
+        )
 
 
 class SqlPriceBarRepository(PriceBarRepository):
