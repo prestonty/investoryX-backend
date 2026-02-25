@@ -4,11 +4,41 @@ This is the backend repository for InvestoryX - a beginner-friendly stock analyt
 
 Here's the link to [InvestoryX Frontend](https://github.com/prestonty/investoryX)
 
-## Quick Start
+## Docker Commands
+
+Start the full stack (backend + db + redis):
 
 ```bash
-uvicorn src.main:app --reload
+docker compose up --build
 ```
+
+Start in the background:
+
+```bash
+docker compose up -d --build
+```
+
+Stream backend logs:
+
+```bash
+docker compose logs -f backend
+```
+
+### Postgres Ports (Local vs Docker)
+
+By default, Docker maps Postgres to `localhost:5432`. If you also run a local
+postgres instance, change the port mapping to avoid conflicts.
+
+In `docker-compose.yml` (db service):
+
+```yaml
+ports:
+  - "5433:5432"
+```
+
+Then connect with:
+- Local Postgres: `localhost:5432`
+- Docker Postgres: `localhost:5433`
 
 ## Technology Stack
 
@@ -33,7 +63,7 @@ uvicorn src.main:app --reload
 ### 1. Clone and Navigate
 
 ```bash
-cd backend2
+cd investoryX-backend
 ```
 
 ### 2. Install Dependencies
@@ -42,8 +72,6 @@ cd backend2
 # Using Poetry (recommended)
 poetry install
 
-# Or using pip
-pip install -r requirements.txt
 ```
 
 ### 3. Environment Configuration
@@ -61,6 +89,9 @@ ALGORITHM=HS256
 
 # Email Service
 RESEND_API_KEY=your_resend_api_key
+
+# Feature Flags
+DISABLE_EMAIL_VERIFICATION=false
 
 # Frontend URLs (for CORS)
 FRONTEND_BASE_URL=http://localhost:3000
@@ -82,10 +113,35 @@ alembic upgrade head
 
 ```bash
 # Development mode with auto-reload
-uvicorn src.main:app --reload
+poetry run uvicorn src.main:app --reload
+
+# Better for debugging
+poetry run uvicorn src.main:app --reload --log-level debug
 
 # Production mode
-uvicorn src.main:app --host 0.0.0.0 --port 8000
+poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000
+
+# Run via Docker (first time or after dependency changes)
+docker compose up --build
+
+# Run via Docker (no dependency changes)
+docker compose up
+```
+
+### Populate Stock Table
+
+The search features read from the db and to use this feature, you must populate the db with stocks via python script.
+
+Run locally with Poetry:
+
+```bash
+poetry run python src/api/database/populateStockData.py
+```
+
+Run inside Docker (recommended if backend uses Docker DB):
+
+```bash
+docker compose run --rm backend python src/api/database/populateStockData.py
 ```
 
 The server will start at `http://127.0.0.1:8000`
@@ -182,6 +238,10 @@ pytest --cov=src
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime             | 30         |
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | Refresh token lifetime            | 7          |
 | `EMAIL_TOKEN_EXPIRE_MINUTES`  | Email verification token lifetime | 1440       |
+| `DISABLE_EMAIL_VERIFICATION`  | Skip email verification on signup | false      |
+| `CELERY_BROKER_URL`           | Celery broker URL (Redis)         | Required   |
+| `CELERY_RESULT_BACKEND`       | Celery result backend (Redis)     | Required   |
+| `CELERY_TIMEZONE`             | Celery timezone                   | America/New_York |
 
 ## Frontend Integration
 

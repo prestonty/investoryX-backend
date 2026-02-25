@@ -1,15 +1,44 @@
-import httpx
-from selectolax.parser import HTMLParser
+import logging
 import time
-import numpy as np
-import pandas as pd
+
+import httpx
 import yfinance as yf
-from src.dataTypes.history import Period, Interval
-from src.utils import dataframeToJson, with_backoff, round_2_decimals, RateLimiter
+from selectolax.parser import HTMLParser
+from src.data_types.history import Period, Interval
+from src.utils import RateLimiter, dataframeToJson, round_2_decimals, with_backoff, format_number
+
+logger = logging.getLogger("investoryx.stock_data")
 
 # Rate limiting
-per_batch_limiter  = RateLimiter(20, 60.0)
+per_batch_limiter = RateLimiter(20, 60.0)
 per_ticker_limiter = RateLimiter(60, 60.0)
+
+MAJOR_STOCKS = [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "META",
+    "NVDA",
+    "NFLX",
+    "AMD",
+    "INTC",
+    "CRM",
+    "ORCL",
+    "ADBE",
+    "PYPL",
+    "UBER",
+    "LYFT",
+    "ZM",
+    "SHOP",
+    "SQ",
+    "ROKU",
+    "SPOT",
+    "SNAP",
+    "TWTR",
+    "PINS",
+]
 
 def getStockPriceYFinance(ticker: str, etf: bool = False):
     """
@@ -98,7 +127,7 @@ def getStockPrice(ticker: str, etf: bool = False):
         # Try yfinance first (more reliable)
         return getStockPriceYFinance(ticker, etf)
     except Exception as e:
-        print(f"yfinance failed for {ticker}: {str(e)}")
+        logger.warning("yfinance failed for %s: %s", ticker, str(e))
         try:
             # Fallback to web scraping
             return getStockPriceWebScraping(ticker, etf)
@@ -106,9 +135,9 @@ def getStockPrice(ticker: str, etf: bool = False):
             raise RuntimeError(f"Both yfinance and web scraping failed for {ticker}. yfinance error: {str(e)}, web scraping error: {str(web_error)}")
 
 
-def getStockPricesBatch(tickers):
+def getQuotes(tickers):
     """
-    Fetches stock prices for multiple tickers using yfinance.
+    Fetches stock quotes - a snapshot of a stock's current market status for multiple tickers using yfinance.
     Respects Yahoo Finance's limit of ~30 tickers per batch.
     Add throttling to avoid rate limits
     """
@@ -152,11 +181,12 @@ def getStockPricesBatch(tickers):
 def getStockHistory(ticker: str, period: Period, interval: Interval):
     try:
         stockData = yf.Ticker(ticker)
-        history = stockData.history(period=period, interval=interval)
+        history = stockData.history(period=str(period), interval=str(interval))
 
-        history = history.reset_index() # Condex index (Date) into a column
+        history = history.reset_index() # Condex index (Date/Datetime) into a column
         history = history.rename(columns={
             "Date": "date",
+            "Datetime": "date",
             "Open": "open",
             "High": "high",
             "Low": "low",
@@ -183,20 +213,6 @@ def getStockOverviewYFinance(ticker: str):
         
         # Map yfinance data to our expected format
         overview = {}
-        
-        # Helper function to format numbers safely
-        def format_number(value, prefix="", suffix="", decimal_places=2):
-            if value is None or value == 'N/A':
-                return "N/A"
-            try:
-                if isinstance(value, (int, float)):
-                    if decimal_places == 0:
-                        return f"{prefix}{value:,}{suffix}"
-                    else:
-                        return f"{prefix}{value:,.{decimal_places}f}{suffix}"
-                return str(value)
-            except:
-                return "N/A"
         
         overview["Market Cap"] = format_number(info.get('marketCap'), "$")
         overview["Revenue (ttm)"] = format_number(info.get('totalRevenue'), "$")
@@ -253,30 +269,17 @@ def getStockOverviewWebScraping(ticker: str):
 
         overviewNode = tree.css("td.font-semibold")
         
-        # Debug: Print the number of nodes found
-        print(f"Found {len(overviewNode)} overview nodes for {ticker}")
-        
-        # Ensure we have enough nodes
-        if len(overviewNode) < len(overview):
-            print(f"Warning: Expected {len(overview)} nodes but found {len(overviewNode)}")
-            # Pad with empty strings if we don't have enough nodes
-            while len(overviewNode) < len(overview):
-                overviewNode.append("N/A")
-        
         # Extract text from nodes
         overviewValues = []
         for i in range(len(overview)):
             if i < len(overviewNode):
                 value = overviewNode[i].text().strip()
                 overviewValues.append(value if value else "N/A")
-            else:
-                overviewValues.append("N/A")
+                continue
+            overviewValues.append("N/A")
         
         result = dict(zip(overview, overviewValues))
-        
-        # Debug: Print the result
-        print(f"Overview data for {ticker}: {result}")
-        
+
         return result
     except httpx.RequestError as e:
         raise RuntimeError(f"Request failed: {str(e)}")
@@ -292,7 +295,7 @@ def getStockOverview(ticker: str):
         # Try yfinance first (more reliable)
         return getStockOverviewYFinance(ticker)
     except Exception as e:
-        print(f"yfinance overview failed for {ticker}: {str(e)}")
+        logger.warning("yfinance overview failed for %s: %s", ticker, str(e))
         try:
             # Fallback to web scraping
             return getStockOverviewWebScraping(ticker)
@@ -359,7 +362,7 @@ def getDefaultIndexes(default_etfs):
         if not default_etfs:
             raise ValueError("No default ETFs provided")
         tickers = {etf["ticker"] for cat in default_etfs for etf in cat["etfs"]}
-        prices = getStockPricesBatch(list(tickers))
+        prices = getQuotes(list(tickers))
 
         for category in default_etfs:
             for etf in category["etfs"]:
@@ -383,14 +386,7 @@ def getTopGainers(limit: int = 5):
     try:
         # For now, we'll use a curated list of major stocks to check for gainers
         # In production, you might want to use a more comprehensive list
-        major_stocks = [
-            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
-            "AMD", "INTC", "CRM", "ORCL", "ADBE", "PYPL", "UBER", "LYFT",
-            "ZM", "SHOP", "SQ", "ROKU", "SPOT", "SNAP", "TWTR", "PINS"
-        ]
-        
-        # Get batch prices for major stocks
-        prices = getStockPricesBatch(major_stocks)
+        prices = getQuotes(MAJOR_STOCKS)
         
         # Filter out errors and calculate percentage changes
         valid_stocks = []
@@ -420,14 +416,7 @@ def getTopLosers(limit: int = 5):
     try:
         # For now, we'll use a curated list of major stocks to check for losers
         # In production, you might want to use a more comprehensive list
-        major_stocks = [
-            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
-            "AMD", "INTC", "CRM", "ORCL", "ADBE", "PYPL", "UBER", "LYFT",
-            "ZM", "SHOP", "SQ", "ROKU", "SPOT", "SNAP", "TWTR", "PINS"
-        ]
-        
-        # Get batch prices for major stocks
-        prices = getStockPricesBatch(major_stocks)
+        prices = getQuotes(MAJOR_STOCKS)
         
         # Filter out errors and calculate percentage changes
         valid_stocks = []
@@ -457,14 +446,7 @@ def getMostActive(limit: int = 5):
     try:
         # For now, we'll use a curated list of major stocks to check for volume
         # In production, you might want to use a more comprehensive list
-        major_stocks = [
-            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
-            "AMD", "INTC", "CRM", "ORCL", "ADBE", "PYPL", "UBER", "LYFT",
-            "ZM", "SHOP", "SQ", "ROKU", "SPOT", "SNAP", "TWTR", "PINS"
-        ]
-        
-        # Get batch prices for major stocks
-        prices = getStockPricesBatch(major_stocks)
+        prices = getQuotes(MAJOR_STOCKS)
         
         # Filter out errors and get volume data
         valid_stocks = []

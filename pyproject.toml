@@ -7,45 +7,51 @@ include = '\.pyi?$'
 max-line-length = 88
 extend-ignore = ["E203", "W503"]
 
-[project]
-name = "backend2"
+[tool.poetry]
+name = "investoryX-backend"
 version = "0.1.0"
 description = ""
-authors = [
-    {name = "Preston Tom-Ying",email = "preston.tomying@gmail.com"}
-]
+authors = ["Preston Tom-Ying <preston.tomying@gmail.com>"]
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "annotated-types (==0.7.0)",
-    "anyio (==4.5.2)",
-    "click (==8.1.8)",
-    "colorama (==0.4.6)",
-    "exceptiongroup (==1.3.0)",
-    "fastapi (==0.115.12)",
-    "h11 (==0.16.0)",
-    "idna (==3.10)",
-    "pydantic (==2.10.6)",
-    "pydantic-core (==2.27.2)",
-    "sniffio (==1.3.1)",
-    "starlette (==0.44.0)",
-    "typing-extensions (==4.13.2)",
-    "uvicorn (==0.33.0)",
-    "httpx (>=0.28.1,<0.29.0)",
-    "selectolax (>=0.3.31,<0.4.0)",
-    "passlib[bcrypt] (>=1.7.4,<2.0.0)",
-    "python-jose[cryptography] (>=3.3.0,<4.0.0)",
-    "python-multipart (>=0.0.6,<1.0.0)",
-    "sqlalchemy (>=2.0.0,<3.0.0)",
-    "psycopg2-binary (>=2.9.0,<3.0.0)",
-    "resend (>=2.13.0,<3.0.0)",
-    "python-dotenv (>=1.1.1,<2.0.0)",
-    "yfinance (>=0.2.64,<1.0.0)",
-    "pandas (>=2.3.0,<3.0.0)",
-    "numpy (>=2.3.1,<3.0.0)"
-]
+packages = [{ include = "src" }]
 
+[tool.poetry.dependencies]
+python = ">=3.12"
+annotated-types = "0.7.0"
+anyio = "4.5.2"
+click = "8.1.8"
+colorama = "0.4.6"
+exceptiongroup = "1.3.0"
+fastapi = "0.115.12"
+h11 = "0.16.0"
+idna = "3.10"
+pydantic = "2.10.6"
+"pydantic-core" = "2.27.2"
+sniffio = "1.3.1"
+starlette = "0.44.0"
+"typing-extensions" = "4.13.2"
+uvicorn = "0.33.0"
+httpx = ">=0.28.1,<0.29.0"
+selectolax = ">=0.3.31,<0.4.0"
+passlib = {version = ">=1.7.4,<2.0.0", extras = ["argon2", "bcrypt"]}
+"python-jose" = {version = ">=3.3.0,<4.0.0", extras = ["cryptography"]}
+"python-multipart" = ">=0.0.6,<1.0.0"
+sqlalchemy = ">=2.0.0,<3.0.0"
+"psycopg2-binary" = ">=2.9.0,<3.0.0"
+resend = ">=2.13.0,<3.0.0"
+"python-dotenv" = ">=1.1.1,<2.0.0"
+yfinance = ">=0.2.64,<1.0.0"
+pandas = ">=2.3.0,<3.0.0"
+numpy = ">=2.3.1,<3.0.0"
+alembic = ">=1.18.0,<2.0.0"
+celery = {extras = ["redis"], version = "^5.6.2"}
+flower = "^2.0.1"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.0.2,<10.0.0)"
+]

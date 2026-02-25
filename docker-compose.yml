@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - investoryx_db:/var/lib/postgresql/data
+
+  backend:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      DISABLE_EMAIL_VERIFICATION: ${DISABLE_EMAIL_VERIFICATION:-false}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug", "--access-log"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+
+  celery-worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_TIMEZONE: ${CELERY_TIMEZONE:-America/New_York}
+    command: ["celery", "-A", "src.celery_app.app", "worker", "-l", "info", "--pool=solo"]
+    depends_on:
+      - db
+      - redis
+
+  celery-beat:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      CELERY_TIMEZONE: ${CELERY_TIMEZONE:-America/New_York}
+    command: ["celery", "-A", "src.celery_app.app", "beat", "-l", "info"]
+    depends_on:
+      - db
+      - redis
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  redis-commander:
+    image: rediscommander/redis-commander
+    ports:
+      - "8081:8081"
+    environment:
+      - "REDIS_HOSTS=local:redis:6379"
+    depends_on:
+      - redis
+
+volumes:
+  investoryx_db:
