@@ -1,7 +1,10 @@
+import json
 import logging
+import os
 import time
 
 import httpx
+import redis
 import yfinance as yf
 from selectolax.parser import HTMLParser
 from src.data_types.history import Period, Interval
@@ -13,32 +16,40 @@ logger = logging.getLogger("investoryx.stock_data")
 per_batch_limiter = RateLimiter(20, 60.0)
 per_ticker_limiter = RateLimiter(60, 60.0)
 
-MAJOR_STOCKS = [
-    "AAPL",
-    "MSFT",
-    "GOOGL",
-    "AMZN",
-    "TSLA",
-    "META",
-    "NVDA",
-    "NFLX",
-    "AMD",
-    "INTC",
-    "CRM",
-    "ORCL",
-    "ADBE",
-    "PYPL",
-    "UBER",
-    "LYFT",
-    "ZM",
-    "SHOP",
-    "SQ",
-    "ROKU",
-    "SPOT",
-    "SNAP",
-    "TWTR",
-    "PINS",
-]
+# Redis cache — reuses the same Redis instance as Celery
+# Keys are namespaced with "cache:" to avoid collisions with Celery keys
+SCREENER_CACHE_TTL = 300  # 5 minutes
+
+try:
+    _redis = redis.from_url(
+        os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+        decode_responses=True,
+    )
+    _redis.ping()
+except Exception as _e:
+    logger.warning("Redis unavailable, screener caching disabled: %s", _e)
+    _redis = None
+
+
+def _cache_get(key: str):
+    if _redis is None:
+        return None
+    try:
+        raw = _redis.get(f"cache:{key}")
+        return json.loads(raw) if raw else None
+    except Exception as e:
+        logger.warning("Cache get failed for %s: %s", key, e)
+        return None
+
+
+def _cache_set(key: str, value, ttl: int = SCREENER_CACHE_TTL):
+    if _redis is None:
+        return
+    try:
+        _redis.setex(f"cache:{key}", ttl, json.dumps(value))
+    except Exception as e:
+        logger.warning("Cache set failed for %s: %s", key, e)
+
 
 def getStockPriceYFinance(ticker: str, etf: bool = False):
     """
@@ -378,100 +389,98 @@ def getDefaultIndexes(default_etfs):
         raise RuntimeError(f"Failed to fetch default ETFs: {str(e)}")
 
 
-def getTopGainers(limit: int = 5):
+def getTopGainers(limit: int = 5, min_price: float = 4.0):
     """
-    Get top 5 gainers (stocks with highest percentage gains)
-    Uses yfinance to fetch data for major market movers
+    Get top gainers using yfinance day_gainers screener.
+    Filters out stocks below min_price to exclude penny stocks.
+    Results are cached in Redis for SCREENER_CACHE_TTL seconds.
     """
+    cache_key = f"day_gainers:{limit}:{min_price}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        # For now, we'll use a curated list of major stocks to check for gainers
-        # In production, you might want to use a more comprehensive list
-        prices = getQuotes(MAJOR_STOCKS)
-        
-        # Filter out errors and calculate percentage changes
-        valid_stocks = []
-        for ticker, data in prices.items():
-            if "error" not in data and data.get("priceChangePercent") is not None:
-                valid_stocks.append({
-                    "ticker": ticker,
-                    "price": round_2_decimals(data["stockPrice"]),
-                    "change": round_2_decimals(data["priceChange"]),
-                    "changePercent": round_2_decimals(data["priceChangePercent"])
+        result = yf.screen('day_gainers', count=limit * 4)
+        quotes = result.get('quotes', [])
+        valid = []
+        for q in quotes:
+            price = q.get('regularMarketPrice') or 0
+            if price >= min_price:
+                valid.append({
+                    "ticker": q['symbol'],
+                    "price": round_2_decimals(price),
+                    "change": round_2_decimals(q.get('regularMarketChange') or 0),
+                    "changePercent": round_2_decimals(q.get('regularMarketChangePercent') or 0),
                 })
-        
-        # Sort by percentage change (highest first) and take top 5
-        top_gainers = sorted(valid_stocks, key=lambda x: x["changePercent"], reverse=True)[:limit]
-        
-        return top_gainers
-        
+            if len(valid) >= limit:
+                break
+        _cache_set(cache_key, valid)
+        return valid
     except Exception as e:
         raise RuntimeError(f"Failed to fetch top gainers: {str(e)}")
 
 
-def getTopLosers(limit: int = 5):
+def getTopLosers(limit: int = 5, min_price: float = 4.0):
     """
-    Get top 5 losers (stocks with highest percentage losses)
-    Uses yfinance to fetch data for major market movers
+    Get top losers using yfinance day_losers screener.
+    Filters out stocks below min_price to exclude penny stocks.
+    Results are cached in Redis for SCREENER_CACHE_TTL seconds.
     """
+    cache_key = f"day_losers:{limit}:{min_price}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        # For now, we'll use a curated list of major stocks to check for losers
-        # In production, you might want to use a more comprehensive list
-        prices = getQuotes(MAJOR_STOCKS)
-        
-        # Filter out errors and calculate percentage changes
-        valid_stocks = []
-        for ticker, data in prices.items():
-            if "error" not in data and data.get("priceChangePercent") is not None:
-                valid_stocks.append({
-                    "ticker": ticker,
-                    "price": round_2_decimals(data["stockPrice"]),
-                    "change": round_2_decimals(data["priceChange"]),
-                    "changePercent": round_2_decimals(data["priceChangePercent"])
+        result = yf.screen('day_losers', count=limit * 4)
+        quotes = result.get('quotes', [])
+        valid = []
+        for q in quotes:
+            price = q.get('regularMarketPrice') or 0
+            if price >= min_price:
+                valid.append({
+                    "ticker": q['symbol'],
+                    "price": round_2_decimals(price),
+                    "change": round_2_decimals(q.get('regularMarketChange') or 0),
+                    "changePercent": round_2_decimals(q.get('regularMarketChangePercent') or 0),
                 })
-        
-        # Sort by percentage change (lowest first) and take top 5
-        top_losers = sorted(valid_stocks, key=lambda x: x["changePercent"])[:limit]
-        
-        return top_losers
-        
+            if len(valid) >= limit:
+                break
+        _cache_set(cache_key, valid)
+        return valid
     except Exception as e:
         raise RuntimeError(f"Failed to fetch top losers: {str(e)}")
 
 
-def getMostActive(limit: int = 5):
+def getMostActive(limit: int = 5, min_price: float = 4.0):
     """
-    Get top 5 most actively traded stocks (highest volume)
-    Uses yfinance to fetch volume data for major stocks
+    Get most actively traded stocks using yfinance most_actives screener.
+    Filters out stocks below min_price to exclude penny stocks.
+    Results are cached in Redis for SCREENER_CACHE_TTL seconds.
     """
+    cache_key = f"most_actives:{limit}:{min_price}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
-        # For now, we'll use a curated list of major stocks to check for volume
-        # In production, you might want to use a more comprehensive list
-        prices = getQuotes(MAJOR_STOCKS)
-        
-        # Filter out errors and get volume data
-        valid_stocks = []
-        for ticker, data in prices.items():
-            if "error" not in data:
-                # Get additional volume data for each stock
-                try:
-                    stock = yf.Ticker(ticker)
-                    info = stock.info
-                    volume = info.get('volume', 0)
-                    
-                    valid_stocks.append({
-                        "ticker": ticker,
-                        "price": round_2_decimals(data["stockPrice"]),
-                        "change": round_2_decimals(data["priceChange"]),
-                        "changePercent": round_2_decimals(data["priceChangePercent"]),
-                        "volume": volume
-                    })
-                except:
-                    continue
-        
-        # Sort by volume (highest first) and take top 5
-        most_active = sorted(valid_stocks, key=lambda x: x["volume"], reverse=True)[:limit]
-        
-        return most_active
-        
+        result = yf.screen('most_actives', count=limit * 4)
+        quotes = result.get('quotes', [])
+        valid = []
+        for q in quotes:
+            price = q.get('regularMarketPrice') or 0
+            if price >= min_price:
+                valid.append({
+                    "ticker": q['symbol'],
+                    "price": round_2_decimals(price),
+                    "change": round_2_decimals(q.get('regularMarketChange') or 0),
+                    "changePercent": round_2_decimals(q.get('regularMarketChangePercent') or 0),
+                    "volume": q.get('regularMarketVolume') or 0,
+                })
+            if len(valid) >= limit:
+                break
+        _cache_set(cache_key, valid)
+        return valid
     except Exception as e:
         raise RuntimeError(f"Failed to fetch most active stocks: {str(e)}")
