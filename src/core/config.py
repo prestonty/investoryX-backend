@@ -22,6 +22,7 @@ class Settings:
 
     debug_errors: bool = os.getenv("DEBUG_ERRORS", "false").lower() in ("1", "true", "yes")
     disable_email_verification: bool = os.getenv("DISABLE_EMAIL_VERIFICATION", "false").lower() in ("1", "true", "yes")
+    dev_mode: bool = os.getenv("DEV_MODE", "false").lower() in ("1", "true", "yes")
 
     frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 

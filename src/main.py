@@ -7,7 +7,7 @@ import logging
 from alembic.config import Config
 from alembic import command
 
-from src.routes import stocks, users, watchlist, auth, simulator, market_data, email
+from src.routes import stocks, users, watchlist, auth, simulator, market_data, email, dev
 
 # Load environment variables
 load_dotenv()
@@ -65,6 +65,7 @@ app.include_router(auth.router)
 app.include_router(simulator.router)
 app.include_router(market_data.router)
 app.include_router(email.router)
+app.include_router(dev.router)
 
 # DB Start up after deploying
 @app.on_event("startup")
