@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from src.api.database.database import SessionLocal
+from src.core.database import SessionLocal
 from src.models.price_bar import PriceBar as PriceBarModel
 from src.models.simulator import Simulator
 from src.models.simulator_position import SimulatorPosition

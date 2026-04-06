@@ -5,9 +5,9 @@ from decimal import Decimal
 from pydantic import BaseModel
 from sqlalchemy import case, or_
 
-from src.api.database.database import get_db
-from src.api.auth.auth import get_current_active_user
-from src.api.services.stock_data_service import getQuotes
+from src.core.database import get_db
+from src.core.security import get_current_active_user
+from src.services.stock_data import getQuotes
 from src.models.stocks import Stocks
 from src.models.watchlist import Watchlist
 from src.models.users import Users

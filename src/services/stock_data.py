@@ -58,11 +58,11 @@ def getStockPriceYFinance(ticker: str, etf: bool = False):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        
+
         # Get current price and previous close
         current_price = info.get('currentPrice', info.get('regularMarketPrice', 'N/A'))
         previous_close = info.get('previousClose', 'N/A')
-        
+
         # Calculate price change
         if current_price != 'N/A' and previous_close != 'N/A':
             price_change = current_price - previous_close
@@ -72,10 +72,10 @@ def getStockPriceYFinance(ticker: str, etf: bool = False):
         else:
             price_change_str = "N/A"
             price_change_percent_str = "N/A"
-        
+
         # Get company name
         company_name = info.get('longName', info.get('shortName', 'N/A'))
-        
+
         return {
             "companyName": company_name,
             "tickerSymbol": ticker.upper(),
@@ -221,10 +221,10 @@ def getStockOverviewYFinance(ticker: str):
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        
+
         # Map yfinance data to our expected format
         overview = {}
-        
+
         overview["Market Cap"] = format_number(info.get('marketCap'), "$")
         overview["Revenue (ttm)"] = format_number(info.get('totalRevenue'), "$")
         overview["Net Income (ttm)"] = format_number(info.get('netIncomeToCommon'), "$")
@@ -237,7 +237,7 @@ def getStockOverviewYFinance(ticker: str):
         overview["Volume"] = format_number(info.get('volume'), "", "", 0)
         overview["Open"] = format_number(info.get('open'), "$")
         overview["Previous Close"] = format_number(info.get('previousClose'), "$")
-        
+
         # Handle ranges
         day_low = info.get('dayLow')
         day_high = info.get('dayHigh')
@@ -245,19 +245,19 @@ def getStockOverviewYFinance(ticker: str):
             overview["Day's Range"] = f"${day_low:.2f} - ${day_high:.2f}"
         else:
             overview["Day's Range"] = "N/A"
-            
+
         week_low = info.get('fiftyTwoWeekLow')
         week_high = info.get('fiftyTwoWeekHigh')
         if week_low and week_high:
             overview["52-Week Range"] = f"${week_low:.2f} - ${week_high:.2f}"
         else:
             overview["52-Week Range"] = "N/A"
-            
+
         overview["Beta"] = format_number(info.get('beta'))
         overview["Analysts"] = format_number(info.get('numberOfAnalystOpinions'), "", "", 0)
         overview["Price Target"] = format_number(info.get('targetMeanPrice'), "$")
         overview["Earnings Date"] = str(info.get('earningsTimestamp', 'N/A'))
-        
+
         return overview
     except Exception as e:
         raise RuntimeError(f"Failed to fetch stock overview data via yfinance: {str(e)}")
@@ -269,17 +269,17 @@ def getStockOverviewWebScraping(ticker: str):
     try:
         url = f"https://stockanalysis.com/stocks/{ticker}/"
         response = httpx.get(url)
-        
+
         if response.status_code != 200:
             raise RuntimeError(f"Failed to fetch stock overview page (status {response.status_code})")
-            
+
         html = response.text
         tree = HTMLParser(html)
-        
+
         overview = ["Market Cap", "Revenue (ttm)", "Net Income (ttm)", "Shares Out", "ESP (ttm)", "PE Ratio", "Foward PE", "Dividend", "Ex-Dividend Date", "Volume", "Open", "Previous Close", "Day's Range", "52-Week Range", "Beta", "Analysts", "Price Target", "Earnings Date"]
 
         overviewNode = tree.css("td.font-semibold")
-        
+
         # Extract text from nodes
         overviewValues = []
         for i in range(len(overview)):
@@ -288,7 +288,7 @@ def getStockOverviewWebScraping(ticker: str):
                 overviewValues.append(value if value else "N/A")
                 continue
             overviewValues.append("N/A")
-        
+
         result = dict(zip(overview, overviewValues))
 
         return result
@@ -323,13 +323,13 @@ def getStockNews(max_articles: int = 20):
         currentNewsCount = 0
 
         newsNodes = tree.css("main div div div div.gap-4")
-        
+
         newsResults = []
 
         for node in newsNodes:
             anchorNode = node.css_first("a")
             articleLink = anchorNode.attributes["href"]
-            
+
             imgNode = anchorNode.css_first("img")
             img = imgNode.attributes["src"]
 
@@ -338,7 +338,7 @@ def getStockNews(max_articles: int = 20):
 
             stockTickerNodes = node.css("a.ticker")
             stockTickers = [stockTickerNode.text() for stockTickerNode in stockTickerNodes]
-            
+
             detailsNode = node.css_first("div div.text-faded")
             details = detailsNode.text().split(" - ")
             postingTime = details[0]

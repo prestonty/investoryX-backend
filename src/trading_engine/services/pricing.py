@@ -10,7 +10,7 @@ import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from src.api.database.database import SessionLocal
+from src.core.database import SessionLocal
 from src.models.price_bar import PriceBar as PriceBarModel
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
 

@@ -1,4 +1,4 @@
-from src.api.database.database import Base
+from src.core.database import Base
 from sqlalchemy import Column, ForeignKey, Integer, String, TIMESTAMP, Numeric, text, Index, Enum
 from sqlalchemy.orm import relationship
 

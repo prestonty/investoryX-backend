@@ -4,8 +4,8 @@ from typing import List
 from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
 
-from src.api.database.database import get_db
-from src.api.auth.auth import get_current_active_user, get_password_hash
+from src.core.database import get_db
+from src.core.security import get_current_active_user, get_password_hash
 from src.models.users import Users
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -27,7 +27,7 @@ class UserResponse(BaseModel):
 
 @router.get("/{user_id}", response_model=UserResponse)
 def get_user(
-    user_id: int, 
+    user_id: int,
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_active_user)
 ):
@@ -44,10 +44,10 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(Users).filter(Users.email == user.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     # Hash the password
     hashed_password = get_password_hash(user.password)
-    
+
     # Create user with hashed password
     db_user = Users(
         Name=user.name,

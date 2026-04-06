@@ -52,6 +52,46 @@ Then connect with:
 - **Migrations**: Alembic for database schema management
 - **Development**: Poetry for dependency management
 
+## Project Structure
+
+```
+investoryx-backend/
+├── alembic/                    # Database migrations
+├── data/                       # Static data files (ETF lists, stock lists)
+├── skills/                     # Claude skill documentation
+├── src/
+│   ├── main.py                 # FastAPI app entry point, router registration
+│   ├── celery_app.py           # Celery worker and beat schedule config
+│   ├── core/
+│   │   ├── config.py           # Centralized environment variable config
+│   │   ├── database.py         # SQLAlchemy engine, SessionLocal, Base, get_db
+│   │   └── security.py         # JWT logic, password hashing, auth dependencies
+│   ├── models/                 # SQLAlchemy ORM models (database tables)
+│   ├── schemas/                # Pydantic request/response models
+│   │   ├── simulator.py        # Simulator-related schemas
+│   │   └── requests.py         # Shared request schemas
+│   ├── routes/                 # FastAPI route handlers (HTTP layer only)
+│   │   ├── auth.py
+│   │   ├── stocks.py
+│   │   ├── watchlist.py
+│   │   ├── simulator.py
+│   │   ├── users.py
+│   │   ├── market_data.py
+│   │   └── email.py
+│   ├── services/               # Business logic (no HTTP awareness)
+│   │   ├── stock_data.py       # yfinance + web scraping, Redis caching
+│   │   ├── email.py            # Resend API email sending
+│   │   ├── email_templates/    # HTML email templates
+│   │   └── seed.py             # Stock table seeding script
+│   ├── trading_engine/         # Celery-based paper trading pipeline
+│   │   ├── services/           # Strategy, portfolio, execution logic
+│   │   ├── tasks/              # Celery tasks (fetch prices, run strategies)
+│   │   └── schedules/          # Celery Beat schedule definitions
+│   ├── data_types/             # Enums (Period, Interval for historical data)
+│   └── utils/                  # Shared helpers (rate limiter, retry, formatters)
+└── tests/                      # Test suite
+```
+
 ## Prerequisites
 
 - Python 3.12+
@@ -136,13 +176,13 @@ The search features read from the db and to use this feature, you must populate 
 Run locally with Poetry:
 
 ```bash
-poetry run python src/api/database/populateStockData.py
+poetry run python src/services/seed.py
 ```
 
 Run inside Docker (recommended if backend uses Docker DB):
 
 ```bash
-docker compose run --rm backend python src/api/database/populateStockData.py
+docker compose run --rm backend python src/services/seed.py
 ```
 
 The server will start at `http://127.0.0.1:8000`
@@ -152,7 +192,7 @@ The server will start at `http://127.0.0.1:8000`
 Run this command:
 
 ```bash
-docker compose exec backend python -m src.api.database.populateStockData
+docker compose exec backend python -m src.services.seed
 ```
 
 ## API Endpoints

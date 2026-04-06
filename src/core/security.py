@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
-from src.api.database.database import get_db
+from src.core.database import get_db
 from src.models.users import Users
 
 # Load environment variables
@@ -140,23 +140,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     payload = verify_token(token)
     if payload is None:
         raise credentials_exception
-    
+
     user_id: int = payload.get("sub")
     if user_id is None:
         raise credentials_exception
-    
+
     user = get_user_by_id(db, user_id)
     if user is None:
         raise credentials_exception
-    
+
     return user
 
 async def get_current_active_user(current_user: Users = Depends(get_current_user)) -> Users:
     """Get the current active user."""
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
-    return current_user 
+    return current_user

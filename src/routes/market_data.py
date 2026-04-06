@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.api.services.stock_data_service import (
+from src.services.stock_data import (
     getDefaultIndexes,
     getMostActive,
     getStockHistory,
@@ -19,7 +19,7 @@ from src.data_types.history import Period, Interval
 router = APIRouter(tags=["market-data"])
 
 NAME = "market_index_ETFs_2.json"
-ETF_PATH = Path(__file__).resolve().parents[3] / "data" / "stocklist" / NAME
+ETF_PATH = Path(__file__).resolve().parents[2] / "data" / "stocklist" / NAME
 
 
 @router.get("/stocks/{ticker}")

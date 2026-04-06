@@ -5,9 +5,9 @@ from typing import List
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 
-from src.api.database.database import get_db
-from src.api.auth.auth import get_current_active_user
-from src.api.services.stock_data_service import getStockHistory
+from src.core.database import get_db
+from src.core.security import get_current_active_user
+from src.services.stock_data import getStockHistory
 from src.data_types.history import Period, Interval
 from src.models.users import Users
 from src.models.simulator import Simulator
@@ -15,7 +15,7 @@ from src.models.simulator_tracked_stock import SimulatorTrackedStock
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_trade import SimulatorTrade
 from src.models.simulator_cash_ledger import SimulatorCashLedger
-from src.models.simulator_schemas import (
+from src.schemas.simulator import (
     SimulatorCreate,
     SimulatorResponse,
     SimulatorRenameRequest,

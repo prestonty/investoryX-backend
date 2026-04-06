@@ -5,12 +5,12 @@ from datetime import timedelta
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import JSONResponse
 import os
-from src.api.auth.auth import get_user_by_email
-from src.api.services.email_service import sendSignUpEmail
+from src.core.security import get_user_by_email
+from src.services.email import sendSignUpEmail
 
 
-from src.api.database.database import get_db
-from src.api.auth.auth import (
+from src.core.database import get_db
+from src.core.security import (
     authenticate_user,
     create_access_token,
     create_refresh_token,
@@ -62,14 +62,14 @@ async def login_for_access_token(
     """Login endpoint that returns a JWT token and sets cookies."""
     # Check if user exists first
     existing_user = get_user_by_email(db, form_data.username)
-    
+
     if not existing_user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No account found with this email address",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # Now check password
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
@@ -78,7 +78,7 @@ async def login_for_access_token(
             detail="Incorrect password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     # Ensure user is active (email verified) unless verification is disabled
     if not user.is_active and not DISABLE_EMAIL_VERIFICATION:
         # Don't resend verification email automatically - user should use the one from registration
@@ -86,24 +86,24 @@ async def login_for_access_token(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Email not verified. Please check your email for the verification link from when you registered.",
         )
-    
+
     # Create both access and refresh tokens
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": str(user.user_id)}, expires_delta=access_token_expires
     )
-    
+
     refresh_token_expires = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     refresh_token = create_refresh_token(
         data={"sub": str(user.user_id)}, expires_delta=refresh_token_expires
     )
-    
+
     # Create response with tokens
     response = {"access_token": access_token, "token_type": "bearer"}
-    
+
     # Set cookies in the response
     json_response = JSONResponse(content=response)
-    
+
     # Set access token cookie (httpOnly=False so frontend can read it)
     json_response.set_cookie(
         key="access_token",
@@ -114,7 +114,7 @@ async def login_for_access_token(
         samesite="lax",
         path="/"
     )
-    
+
     # Set refresh token cookie (httpOnly=True for security)
     json_response.set_cookie(
         key="refresh_token",
@@ -125,7 +125,7 @@ async def login_for_access_token(
         samesite="lax",
         path="/"
     )
-    
+
     return json_response
 
 @router.post("/register", response_model=UserResponse)
@@ -181,7 +181,7 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 async def read_users_me(current_user: Users = Depends(get_current_active_user)):
     """Get current user information."""
-    return current_user 
+    return current_user
 
 @router.get("/verify-email")
 async def verify_email(token: str, db: Session = Depends(get_db)):
@@ -207,10 +207,10 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
 def refresh_token_endpoint(request: Request, db: Session = Depends(get_db)):
     """Endpoint to refresh access token using a refresh token from cookies."""
     result = refresh_access_token(request, db)
-    
+
     # Set the new access token as a cookie
     response = JSONResponse(content=result)
-    
+
     response.set_cookie(
         key="access_token",
         value=result["access_token"],
@@ -220,26 +220,26 @@ def refresh_token_endpoint(request: Request, db: Session = Depends(get_db)):
         samesite="lax",
         path="/"
     )
-    
+
     return response
 
 @router.post("/logout")
 async def logout():
-    """Logout endpoint that clears authentication cookies."""    
+    """Logout endpoint that clears authentication cookies."""
     response = JSONResponse(content={"message": "Logged out successfully"})
-    
+
     # Clear access token cookie
     response.delete_cookie(
         key="access_token",
         path="/"
     )
-    
+
     # Clear refresh token cookie
     response.delete_cookie(
         key="refresh_token",
         path="/"
     )
-    
+
     return response
 
 @router.post("/test-email")

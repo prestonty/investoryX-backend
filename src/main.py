@@ -7,7 +7,7 @@ import logging
 from alembic.config import Config
 from alembic import command
 
-from src.api.routes import stocks, users, watchlist, auth, simulator, market_data, email
+from src.routes import stocks, users, watchlist, auth, simulator, market_data, email
 
 # Load environment variables
 load_dotenv()
