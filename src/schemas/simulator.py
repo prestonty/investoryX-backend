@@ -10,6 +10,7 @@ SIMULATOR_FREQUENCY_DAILY = "daily"
 SIMULATOR_PRICE_MODE_CLOSE = "close"
 SimulatorFrequency = Literal["daily", "twice_daily"]
 SimulatorPriceMode = Literal["open", "close"]
+SimulatorStrategyName = Literal["sma_crossover", "stat_arb_pairs", "auction_liquidity_provider"]
 
 
 class SimulatorCreate(BaseModel):
@@ -37,6 +38,7 @@ class SimulatorResponse(BaseModel):
     max_position_pct: Optional[Decimal]
     max_daily_loss_pct: Optional[Decimal]
     stopped_reason: Optional[str]
+    strategy_name: str = "sma_crossover"
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     tickers: List[str] = []
@@ -54,6 +56,7 @@ class SimulatorSettingsUpdateRequest(BaseModel):
     price_mode: Optional[SimulatorPriceMode] = None
     max_position_pct: Optional[Decimal] = None
     max_daily_loss_pct: Optional[Decimal] = None
+    strategy_name: Optional[SimulatorStrategyName] = None
 
 
 class SimulatorTrackedStockCreate(BaseModel):

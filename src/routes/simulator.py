@@ -114,6 +114,8 @@ def update_simulator_settings(
         simulator.max_position_pct = payload.max_position_pct
     if "max_daily_loss_pct" in payload.model_fields_set:
         simulator.max_daily_loss_pct = payload.max_daily_loss_pct
+    if "strategy_name" in payload.model_fields_set and payload.strategy_name is not None:
+        simulator.strategy_name = payload.strategy_name
 
     db.add(simulator)
     db.commit()
@@ -148,6 +150,7 @@ def list_simulators(
             max_position_pct=s.max_position_pct,
             max_daily_loss_pct=s.max_daily_loss_pct,
             stopped_reason=s.stopped_reason,
+            strategy_name=s.strategy_name or "sma_crossover",
             created_at=s.created_at,
             updated_at=s.updated_at,
             tickers=[ts.ticker for ts in s.tracked_stocks],

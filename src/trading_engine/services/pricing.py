@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Protocol
 import logging
 
+import pandas as pd
 import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -118,7 +119,8 @@ class YahooPriceProvider(PriceProvider):
             symbol = symbols[0]
             if data.empty:
                 return []
-            row = data.iloc[0]
+            frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
+            row = frame.iloc[0]
             bars.append(
                 PriceBar(
                     symbol=symbol,
@@ -191,7 +193,8 @@ class YahooPriceProvider(PriceProvider):
             symbol = symbols[0]
             if data.empty:
                 return []
-            for row_day, row in data.iterrows():
+            frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
+            for row_day, row in frame.iterrows():
                 if not _is_trading_day(row_day.date()):
                     continue
                 bars.append(
