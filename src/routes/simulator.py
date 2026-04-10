@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from typing import List
 from decimal import Decimal
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from src.core.database import get_db
 from src.core.security import get_current_active_user
@@ -29,6 +30,10 @@ from src.schemas.simulator import (
     MessageResponse,
     SimulatorRunResponse,
     SimulatorRunRequest,
+    BacktestRequest,
+    BacktestLaunchResponse,
+    BacktestStatusResponse,
+    BacktestResult as BacktestResultSchema,
 )
 
 
@@ -354,6 +359,7 @@ def run_simulator(
                     price=current_price,
                     shares=shares,
                     fee=fee,
+                    balance_after=Decimal(str(simulator.cash_balance)),
                 )
             )
             db.add(
@@ -390,6 +396,7 @@ def run_simulator(
                 price=current_price,
                 shares=shares,
                 fee=fee,
+                balance_after=Decimal(str(simulator.cash_balance)),
             )
         )
         db.add(
@@ -482,6 +489,102 @@ def delete_tracked_stock(
     db.delete(tracked)
     db.commit()
     return {"message": "Tracked stock removed"}
+
+
+@router.post("/{simulator_id}/backtest", response_model=BacktestLaunchResponse, status_code=202)
+def launch_backtest(
+    simulator_id: int,
+    payload: BacktestRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user),
+):
+    """Launch a backtest for a simulator over a historical date range."""
+    from src.trading_engine.tasks.run_backtest import run_backtest_task
+    from src.models.simulator_tracked_stock import SimulatorTrackedStock as _TrackedStock
+
+    simulator = get_user_simulator(db, simulator_id, current_user.user_id)
+    if not simulator:
+        raise HTTPException(status_code=404, detail="Simulator not found")
+
+    today = date.today()
+    if payload.start_date >= payload.end_date:
+        raise HTTPException(status_code=400, detail="start_date must be before end_date")
+    if payload.end_date >= today:
+        raise HTTPException(status_code=400, detail="end_date must be before today")
+    if (payload.end_date - payload.start_date).days > 365 * 5:
+        raise HTTPException(status_code=400, detail="Date range cannot exceed 5 years")
+
+    # Ensure at least one weekday in range
+    trading_days = [
+        d
+        for d in (
+            payload.start_date + timedelta(days=i)
+            for i in range((payload.end_date - payload.start_date).days + 1)
+        )
+        if d.weekday() < 5
+    ]
+    if not trading_days:
+        raise HTTPException(status_code=400, detail="Date range contains no valid trading days (Mon–Fri)")
+
+    enabled_stocks = (
+        db.query(_TrackedStock)
+        .filter(
+            _TrackedStock.simulator_id == simulator_id,
+            _TrackedStock.enabled.is_(True),
+        )
+        .count()
+    )
+    if enabled_stocks == 0:
+        raise HTTPException(status_code=400, detail="No enabled tracked stocks — add stocks before running a backtest")
+
+    price_mode = payload.price_mode or simulator.price_mode or "close"
+
+    try:
+        task = run_backtest_task.delay(
+            simulator_id,
+            payload.start_date.isoformat(),
+            payload.end_date.isoformat(),
+            price_mode,
+            payload.clear_previous,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Backtest service unavailable: {exc}")
+
+    return BacktestLaunchResponse(task_id=task.id, message="Backtest queued")
+
+
+@router.get("/{simulator_id}/backtest/status/{task_id}", response_model=BacktestStatusResponse)
+def get_backtest_status(
+    simulator_id: int,
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user),
+):
+    """Poll the status of a running or completed backtest task."""
+    from celery.result import AsyncResult
+
+    # Verify the simulator belongs to the current user
+    simulator = get_user_simulator(db, simulator_id, current_user.user_id)
+    if not simulator:
+        raise HTTPException(status_code=404, detail="Simulator not found")
+
+    async_result = AsyncResult(task_id)
+    state = async_result.state
+
+    if state in ("PENDING", "RECEIVED"):
+        return BacktestStatusResponse(task_id=task_id, status="pending")
+    if state == "STARTED":
+        return BacktestStatusResponse(task_id=task_id, status="running")
+    if state == "SUCCESS":
+        raw = async_result.result or {}
+        try:
+            result = BacktestResultSchema(**raw)
+        except Exception:
+            result = None
+        return BacktestStatusResponse(task_id=task_id, status="success", result=result)
+    # FAILURE or REVOKED
+    error_msg = str(async_result.result) if async_result.result else "Backtest failed"
+    return BacktestStatusResponse(task_id=task_id, status="failure", error=error_msg)
 
 
 @router.delete(

@@ -107,6 +107,7 @@ class SimpleMovingAverageStrategy:
                         symbol=symbol,
                         action=SignalAction.HOLD,
                         quantity=Decimal("0"),
+                        price=closes[-1] if closes else Decimal("0"),
                         reason=(
                             f"Not enough history for SMA crossover "
                             f"({len(closes)}/{long_window} bars)"
@@ -150,6 +151,7 @@ class SimpleMovingAverageStrategy:
                     symbol=symbol,
                     action=action,
                     quantity=quantity,
+                    price=closes[-1],
                     reason=reason,
                     confidence=confidence,
                     strategy_name=self.name,
@@ -240,17 +242,17 @@ class PairsTradingStrategy:
 
         return signals
 
-    def _create_signal(self, symbol, action, qty, reason, ts) -> Signal:
+    def _create_signal(self, symbol, action, qty, reason, ts, price: Decimal = Decimal("0")) -> Signal:
         return Signal(
             symbol=symbol, action=action, quantity=qty,
-            reason=reason, confidence=Decimal("0.8"), 
+            price=price, reason=reason, confidence=Decimal("0.8"),
             strategy_name=self.name, created_at=ts
         )
 
-    def _hold_signal(self, symbol, reason, ts) -> Signal:
+    def _hold_signal(self, symbol, reason, ts, price: Decimal = Decimal("0")) -> Signal:
         return Signal(
             symbol=symbol, action=SignalAction.HOLD, quantity=Decimal("0"),
-            reason=reason, confidence=Decimal("0"), 
+            price=price, reason=reason, confidence=Decimal("0"),
             strategy_name=self.name, created_at=ts
         )
 
@@ -303,18 +305,20 @@ class AuctionLiquidityStrategy:
                     symbol=symbol,
                     action=SignalAction.SELL,
                     quantity=trade_size,
+                    price=latest_bar.close,
                     reason=f"Selling price spike: {price_gap:.2%} deviation",
                     confidence=Decimal("0.7"),
                     strategy_name=self.name,
                     created_at=created_at
                 ))
-            
+
             # If the price is gaping DOWN, we BUY.
             elif price_gap < -dev_threshold:
                 signals.append(Signal(
                     symbol=symbol,
                     action=SignalAction.BUY,
                     quantity=trade_size,
+                    price=latest_bar.close,
                     reason=f"Buying price dip: {price_gap:.2%} deviation",
                     confidence=Decimal("0.7"),
                     strategy_name=self.name,

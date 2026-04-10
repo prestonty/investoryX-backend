@@ -19,3 +19,5 @@ class SimulatorTrade(Base):
     shares = Column(Numeric(14, 6), nullable=False)
     fee = Column(Numeric(10, 2), nullable=False, server_default="0")
     executed_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    source = Column(String, nullable=True, server_default="live")
+    balance_after = Column(Numeric(12, 2), nullable=True)
