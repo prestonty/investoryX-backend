@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from src.api.database.database import SessionLocal
+from src.core.database import SessionLocal
 from src.models.price_bar import PriceBar as PriceBarModel
 from src.models.simulator import Simulator
 from src.models.simulator_position import SimulatorPosition
@@ -25,6 +25,9 @@ from .strategy import (
     Signal,
     StrategyRegistry,
     StrategyService,
+    SimpleMovingAverageStrategy,
+    PairsTradingStrategy,
+    AuctionLiquidityStrategy,
 )
 
 STATUS_OK = "ok"
@@ -91,13 +94,15 @@ class EvaluationService:
         targets = self.load_target_portfolios(user_id)
         strategy_registry = self.build_strategy_registry()
         strategy_service = StrategyService(strategy_registry)
-        strategy_name = str(params.get("strategy_name", "sma_crossover"))
+        # strategy_name can be overridden globally via params, otherwise each simulator uses its own
+        global_strategy_name = params.get("strategy_name")
 
         simulator_results: list[dict] = []
         stats = EvaluationRunStats()
 
         for simulator in targets:
             simulator_id = int(simulator.simulator_id)
+            strategy_name = global_strategy_name or getattr(simulator, "strategy_name", None) or "sma_crossover"
             result = self._evaluate_one_simulator(
                 simulator_id=simulator_id,
                 strategy_service=strategy_service,
@@ -114,7 +119,7 @@ class EvaluationService:
 
         return self.build_evaluation_summary(
             user_id=user_id,
-            strategy_name=strategy_name,
+            strategy_name=global_strategy_name or "per_simulator",
             simulators_processed=len(targets),
             total_signals=stats.total_signals,
             skipped=stats.skipped,
@@ -292,6 +297,8 @@ class EvaluationService:
         registry = StrategyRegistry()
         registry.register(SimpleMovingAverageStrategy())
         registry.register(Sma50x200CrossoverStrategy())
+        registry.register(AuctionLiquidityStrategy())
+        registry.register(PairsTradingStrategy())
         return registry
 
     def resolve_long_window(self, params: dict, strategy_name: str) -> int:

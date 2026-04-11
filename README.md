@@ -37,26 +37,67 @@ ports:
 ```
 
 Then connect with:
+
 - Local Postgres: `localhost:5432`
 - Docker Postgres: `localhost:5433`
 
 ## Technology Stack
 
--   **Framework**: FastAPI 0.115.12
--   **Database**: PostgreSQL with SQLAlchemy 2.0+
--   **Authentication**: JWT tokens with bcrypt password hashing
--   **Email**: Resend API integration for user verification
--   **Stock Data**: Yahoo Finance (yfinance) with web scraping fallbacks
--   **Data Processing**: Pandas, NumPy for financial calculations
--   **Migrations**: Alembic for database schema management
--   **Development**: Poetry for dependency management
+- **Framework**: FastAPI 0.115.12
+- **Database**: PostgreSQL with SQLAlchemy 2.0+
+- **Authentication**: JWT tokens with bcrypt password hashing
+- **Email**: Resend API integration for user verification
+- **Stock Data**: Yahoo Finance (yfinance) with web scraping fallbacks
+- **Data Processing**: Pandas, NumPy for financial calculations
+- **Migrations**: Alembic for database schema management
+- **Development**: Poetry for dependency management
+
+## Project Structure
+
+```
+investoryx-backend/
+├── alembic/                    # Database migrations
+├── data/                       # Static data files (ETF lists, stock lists)
+├── skills/                     # Claude skill documentation
+├── src/
+│   ├── main.py                 # FastAPI app entry point, router registration
+│   ├── celery_app.py           # Celery worker and beat schedule config
+│   ├── core/
+│   │   ├── config.py           # Centralized environment variable config
+│   │   ├── database.py         # SQLAlchemy engine, SessionLocal, Base, get_db
+│   │   └── security.py         # JWT logic, password hashing, auth dependencies
+│   ├── models/                 # SQLAlchemy ORM models (database tables)
+│   ├── schemas/                # Pydantic request/response models
+│   │   ├── simulator.py        # Simulator-related schemas
+│   │   └── requests.py         # Shared request schemas
+│   ├── routes/                 # FastAPI route handlers (HTTP layer only)
+│   │   ├── auth.py
+│   │   ├── stocks.py
+│   │   ├── watchlist.py
+│   │   ├── simulator.py
+│   │   ├── users.py
+│   │   ├── market_data.py
+│   │   └── email.py
+│   ├── services/               # Business logic (no HTTP awareness)
+│   │   ├── stock_data.py       # yfinance + web scraping, Redis caching
+│   │   ├── email.py            # Resend API email sending
+│   │   ├── email_templates/    # HTML email templates
+│   │   └── seed.py             # Stock table seeding script
+│   ├── trading_engine/         # Celery-based paper trading pipeline
+│   │   ├── services/           # Strategy, portfolio, execution logic
+│   │   ├── tasks/              # Celery tasks (fetch prices, run strategies)
+│   │   └── schedules/          # Celery Beat schedule definitions
+│   ├── data_types/             # Enums (Period, Interval for historical data)
+│   └── utils/                  # Shared helpers (rate limiter, retry, formatters)
+└── tests/                      # Test suite
+```
 
 ## Prerequisites
 
--   Python 3.12+
--   PostgreSQL database
--   Poetry (for dependency management)
--   Environment variables configured
+- Python 3.12+
+- PostgreSQL database
+- Poetry (for dependency management)
+- Environment variables configured
 
 ## Installation & Setup
 
@@ -135,73 +176,81 @@ The search features read from the db and to use this feature, you must populate 
 Run locally with Poetry:
 
 ```bash
-poetry run python src/api/database/populateStockData.py
+poetry run python src/services/seed.py
 ```
 
 Run inside Docker (recommended if backend uses Docker DB):
 
 ```bash
-docker compose run --rm backend python src/api/database/populateStockData.py
+docker compose run --rm backend python src/services/seed.py
 ```
 
 The server will start at `http://127.0.0.1:8000`
+
+#### Populate Stock Table via Claude Skill
+
+Run this command:
+
+```bash
+docker compose exec backend python -m src.services.seed
+```
 
 ## API Endpoints
 
 ### Authentication (`/api/auth`)
 
--   `POST /token` - User login
--   `POST /register` - User registration
--   `GET /me` - Get current user info
--   `GET /verify-email` - Email verification
--   `POST /refresh` - Refresh access token
--   `POST /logout` - User logout
+- `POST /token` - User login
+- `POST /register` - User registration
+- `GET /me` - Get current user info
+- `GET /verify-email` - Email verification
+- `POST /refresh` - Refresh access token
+- `POST /logout` - User logout
 
 ### Stocks (`/api/stocks`)
 
--   `GET /` - List all stocks
--   `GET /{stock_id}` - Get stock by ID
--   `GET /ticker/{ticker}` - Get stock by ticker symbol
--   `GET /search/{filter_string}` - Search stocks
--   `POST /` - Create new stock entry
+- `GET /` - List all stocks
+- `GET /{stock_id}` - Get stock by ID
+- `GET /ticker/{ticker}` - Get stock by ticker symbol
+- `GET /search/{filter_string}` - Search stocks
+- `POST /` - Create new stock entry
 
 ### Users (`/api/users`)
 
--   User management endpoints
+- User management endpoints
 
 ### Watchlist (`/api/watchlist`)
 
--   Personal stock watchlist management
+- Personal stock watchlist management
 
 ### Stock Data (Root Level)
 
--   `GET /stocks/{ticker}` - Basic stock information
--   `GET /stock-overview/{ticker}` - Detailed stock overview
--   `GET /stock-news` - Latest stock market news
--   `GET /stock-history/{ticker}` - Historical stock data
--   `GET /get-default-indexes` - Default market index ETFs
+- `GET /stocks/{ticker}` - Basic stock information
+- `GET /stock-overview/{ticker}` - Detailed stock overview
+- `GET /stock-news` - Latest stock market news
+- `GET /stock-history/{ticker}` - Historical stock data
+- `GET /get-default-indexes` - Default market index ETFs
 
 ## Security Features
 
--   **Password Hashing**: bcrypt with automatic salt generation
--   **JWT Tokens**: Access and refresh token system
--   **Email Verification**: Required for account activation
--   **CORS Protection**: Configurable cross-origin resource sharing
--   **Rate Limiting**: Protection against API abuse
+- **Password Hashing**: bcrypt with automatic salt generation
+- **JWT Tokens**: Access and refresh token system
+- **Email Verification**: Required for account activation
+- **CORS Protection**: Configurable cross-origin resource sharing
+- **Rate Limiting**: Protection against API abuse
 
 ## Data Sources
 
--   **Primary**: Yahoo Finance API (yfinance)
--   **Fallback**: Web scraping from stockanalysis.com
--   **Local**: Curated ETF and market index data
+- **Primary**: Yahoo Finance API (yfinance)
+- **Fallback**: Web scraping from stockanalysis.com
+- **Local**: Curated ETF and market index data
 
 ## Development
 
 ### Code Quality
 
--   **Black**: Code formatting (88 character line length)
--   **Flake8**: Linting and style checking
--   **Type Hints**: Full Python type annotation support
+- **Black**: Code formatting (88 character line length)
+- **Flake8**: Linting and style checking
+- **Type Hints**: Full Python type annotation support
 
 ### Database Migrations
 
@@ -228,30 +277,30 @@ pytest --cov=src
 
 ## Environment Variables
 
-| Variable                      | Description                       | Default    |
-| ----------------------------- | --------------------------------- | ---------- |
-| `DATABASE_URL`                | PostgreSQL connection string      | Required   |
-| `SECRET_KEY`                  | JWT signing key                   | Required   |
-| `REFRESH_SECRET_KEY`          | Refresh token signing key         | SECRET_KEY |
-| `ALGORITHM`                   | JWT algorithm                     | HS256      |
-| `RESEND_API_KEY`              | Email service API key             | Required   |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime             | 30         |
-| `REFRESH_TOKEN_EXPIRE_DAYS`   | Refresh token lifetime            | 7          |
-| `EMAIL_TOKEN_EXPIRE_MINUTES`  | Email verification token lifetime | 1440       |
-| `DISABLE_EMAIL_VERIFICATION`  | Skip email verification on signup | false      |
-| `CELERY_BROKER_URL`           | Celery broker URL (Redis)         | Required   |
-| `CELERY_RESULT_BACKEND`       | Celery result backend (Redis)     | Required   |
+| Variable                      | Description                       | Default          |
+| ----------------------------- | --------------------------------- | ---------------- |
+| `DATABASE_URL`                | PostgreSQL connection string      | Required         |
+| `SECRET_KEY`                  | JWT signing key                   | Required         |
+| `REFRESH_SECRET_KEY`          | Refresh token signing key         | SECRET_KEY       |
+| `ALGORITHM`                   | JWT algorithm                     | HS256            |
+| `RESEND_API_KEY`              | Email service API key             | Required         |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token lifetime             | 30               |
+| `REFRESH_TOKEN_EXPIRE_DAYS`   | Refresh token lifetime            | 7                |
+| `EMAIL_TOKEN_EXPIRE_MINUTES`  | Email verification token lifetime | 1440             |
+| `DISABLE_EMAIL_VERIFICATION`  | Skip email verification on signup | false            |
+| `CELERY_BROKER_URL`           | Celery broker URL (Redis)         | Required         |
+| `CELERY_RESULT_BACKEND`       | Celery result backend (Redis)     | Required         |
 | `CELERY_TIMEZONE`             | Celery timezone                   | America/New_York |
 
 ## Frontend Integration
 
 This backend application is designed to work with the [InvestoryX Frontend](https://github.com/prestonty/investoryX) application, which provides:
 
--   Modern React-based user interface
--   Real-time data visualization with Plotly.js
--   Responsive design for all device types
--   JWT-based authentication integration
--   Portfolio management and watchlist features
+- Modern React-based user interface
+- Real-time data visualization with Plotly.js
+- Responsive design for all device types
+- JWT-based authentication integration
+- Portfolio management and watchlist features
 
 The backend provides RESTful API endpoints that the frontend consumes through a centralized API layer, ensuring clean separation of concerns and maintainable code structure.
 
@@ -259,9 +308,9 @@ The backend provides RESTful API endpoints that the frontend consumes through a 
 
 For issues and questions:
 
--   Check the API documentation at `/docs` when the server is running
--   Review the FastAPI interactive docs at `/redoc`
--   Check the logs for detailed error information
+- Check the API documentation at `/docs` when the server is running
+- Review the FastAPI interactive docs at `/redoc`
+- Check the logs for detailed error information
 
 ## License
 

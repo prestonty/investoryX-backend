@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from src.api.services.email_service import sendSignUpEmail, sendWelcomeEmail
-from src.models.requests import EmailRequest
+from src.services.email import sendSignUpEmail, sendWelcomeEmail
+from src.schemas.requests import EmailRequest
 
 
 router = APIRouter(tags=["email"])

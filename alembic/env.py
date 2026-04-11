@@ -28,7 +28,7 @@ config.set_main_option("sqlalchemy.url", database_url)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from src.api.database.database import Base
+from src.core.database import Base
 from src.models import (
     stocks,
     users,

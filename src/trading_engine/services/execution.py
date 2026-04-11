@@ -290,6 +290,19 @@ class PaperTradeExecutionService:
             slippage_bps=context.slippage_bps,
         )
         fee = context.fee_per_trade
+        trade_value = fill_price * intent.quantity
+        if intent.side is SignalAction.BUY:
+            new_cash = current_cash - trade_value - fee
+            context.holdings_by_sim.setdefault(sim_id, {})
+            context.holdings_by_sim[sim_id][symbol] = current_holding + intent.quantity
+        elif intent.side is SignalAction.SELL:
+            new_cash = current_cash + trade_value - fee
+            context.holdings_by_sim.setdefault(sim_id, {})
+            context.holdings_by_sim[sim_id][symbol] = current_holding - intent.quantity
+        else:
+            new_cash = current_cash
+        context.cash_by_sim[sim_id] = new_cash
+
         trade = self._to_trade(
             simulator_id=sim_id,
             symbol=symbol,
@@ -298,17 +311,8 @@ class PaperTradeExecutionService:
             fill_price=fill_price,
             fee=fee,
             executed_at=context.now,
+            balance_after=new_cash,
         )
-
-        trade_value = fill_price * intent.quantity
-        if intent.side is SignalAction.BUY:
-            context.cash_by_sim[sim_id] = current_cash - trade_value - fee
-            context.holdings_by_sim.setdefault(sim_id, {})
-            context.holdings_by_sim[sim_id][symbol] = current_holding + intent.quantity
-        elif intent.side is SignalAction.SELL:
-            context.cash_by_sim[sim_id] = current_cash + trade_value - fee
-            context.holdings_by_sim.setdefault(sim_id, {})
-            context.holdings_by_sim[sim_id][symbol] = current_holding - intent.quantity
 
         self._mark_executed(signal, context.now)
         return SignalOutcome.EXECUTED, trade
@@ -390,6 +394,7 @@ class PaperTradeExecutionService:
         fill_price: Decimal,
         fee: Decimal,
         executed_at: datetime,
+        balance_after: Decimal | None = None,
     ) -> SimulatorTrade:
         return SimulatorTrade(
             simulator_id=simulator_id,
@@ -399,4 +404,5 @@ class PaperTradeExecutionService:
             shares=quantity,
             fee=fee,
             executed_at=executed_at,
+            balance_after=balance_after,
         )

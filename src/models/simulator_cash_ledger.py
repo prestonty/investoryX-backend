@@ -1,4 +1,4 @@
-from src.api.database.database import Base
+from src.core.database import Base
 from sqlalchemy import Column, ForeignKey, Integer, Numeric, String, TIMESTAMP, text, Index
 
 
@@ -18,3 +18,4 @@ class SimulatorCashLedger(Base):
     reason = Column(String, nullable=False)
     balance_after = Column(Numeric(12, 2), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    source = Column(String, nullable=True, server_default="live")

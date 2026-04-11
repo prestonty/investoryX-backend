@@ -6,11 +6,12 @@ from decimal import Decimal
 from typing import Protocol
 import logging
 
+import pandas as pd
 import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
-from src.api.database.database import SessionLocal
+from src.core.database import SessionLocal
 from src.models.price_bar import PriceBar as PriceBarModel
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
 
@@ -113,6 +114,27 @@ class YahooPriceProvider(PriceProvider):
             return []
 
         bars: list[PriceBar] = []
+
+        if len(symbols) == 1:
+            symbol = symbols[0]
+            if data.empty:
+                return []
+            frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
+            row = frame.iloc[0]
+            bars.append(
+                PriceBar(
+                    symbol=symbol,
+                    day=day,
+                    open=Decimal(str(row["Open"])),
+                    high=Decimal(str(row["High"])),
+                    low=Decimal(str(row["Low"])),
+                    close=Decimal(str(row["Close"])),
+                    volume=int(row.get("Volume", 0)),
+                    source="yfinance",
+                )
+            )
+            return bars
+
         for symbol in symbols:
             frame = self._extract_symbol_frame(data, symbol)
             if frame.empty:
@@ -155,6 +177,28 @@ class YahooPriceProvider(PriceProvider):
             return []
 
         bars: list[PriceBar] = []
+
+        if len(symbols) == 1:
+            symbol = symbols[0]
+            if data.empty:
+                return []
+            frame = data[symbol] if isinstance(data.columns, pd.MultiIndex) else data
+            for row_day, row in frame.iterrows():
+                if not _is_trading_day(row_day.date()):
+                    continue
+                bars.append(
+                    PriceBar(
+                        symbol=symbol,
+                        day=row_day.date(),
+                        open=Decimal(str(row["Open"])),
+                        high=Decimal(str(row["High"])),
+                        low=Decimal(str(row["Low"])),
+                        close=Decimal(str(row["Close"])),
+                        volume=int(row.get("Volume", 0)),
+                        source="yfinance",
+                    )
+                )
+            return bars
 
         for symbol in symbols:
             frame = self._extract_symbol_frame(data, symbol)

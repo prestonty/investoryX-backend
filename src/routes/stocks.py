@@ -4,13 +4,16 @@ from typing import List, Optional
 from decimal import Decimal
 from pydantic import BaseModel
 from sqlalchemy import case, or_
+import logging
 
-from src.api.database.database import get_db
-from src.api.auth.auth import get_current_active_user
-from src.api.services.stock_data_service import getQuotes
+from src.core.database import get_db
+from src.core.security import get_current_active_user
+from src.services.stock_data import getQuotes
 from src.models.stocks import Stocks
 from src.models.watchlist import Watchlist
 from src.models.users import Users
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/stocks", tags=["stocks"])
 
@@ -84,9 +87,16 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
         Returns:
             general information about the stock, company, etc. stored in the database (no time-varying info such as price)
     """
-    stock = db.query(Stocks).filter(Stocks.ticker.ilike(f"%{ticker}%")).first()  # case insensitive comparison
+    logger.info("GET /api/stocks/ticker/%s", ticker)
+    try:
+        stock = db.query(Stocks).filter(Stocks.ticker.ilike(f"%{ticker}%")).first()  # case insensitive comparison
+    except Exception as exc:
+        logger.exception("DB error looking up ticker %s: %s", ticker, exc)
+        raise HTTPException(status_code=500, detail=f"Database error while looking up ticker '{ticker}': {exc}")
     if not stock:
-        raise HTTPException(status_code=404, detail="Stock not found")
+        logger.warning("Ticker '%s' not found in database", ticker)
+        raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found in the database. Make sure it has been seeded.")
+    logger.info("Found ticker %s -> stock_id=%s", ticker, stock.stock_id)
     return stock
 
 
@@ -107,24 +117,36 @@ def get_watchlist_quotes(
     current_user: Users = Depends(get_current_active_user),
 ):
     """Get the current user's watchlist enriched with ticker and live quote data."""
-    rows = (
-        db.query(Watchlist, Stocks)
-        .join(Stocks, Stocks.stock_id == Watchlist.stock_id)
-        .filter(Watchlist.user_id == current_user.user_id)
-        .all()
-    )
+    logger.info("GET /api/stocks/watchlist/quotes for user_id=%s", current_user.user_id)
+    try:
+        rows = (
+            db.query(Watchlist, Stocks)
+            .join(Stocks, Stocks.stock_id == Watchlist.stock_id)
+            .filter(Watchlist.user_id == current_user.user_id)
+            .all()
+        )
+    except Exception as exc:
+        logger.exception("DB error fetching watchlist for user_id=%s: %s", current_user.user_id, exc)
+        raise HTTPException(status_code=500, detail=f"Database error fetching watchlist: {exc}")
 
     if not rows:
         return []
 
     tickers = [stock.ticker.upper() for _, stock in rows]
-    price_map = getQuotes(tickers)
+    logger.info("Fetching quotes for tickers: %s", tickers)
+    try:
+        price_map = getQuotes(tickers)
+    except Exception as exc:
+        logger.exception("getQuotes failed for tickers %s: %s", tickers, exc)
+        raise HTTPException(status_code=502, detail=f"Failed to fetch live quotes for {tickers}: {exc}")
 
     results: List[WatchlistQuoteItem] = []
     for watch_item, stock in rows:
         ticker = stock.ticker.upper()
         price_data = price_map.get(ticker, {})
         error = price_data.get("error") if isinstance(price_data, dict) else None
+        if error:
+            logger.warning("Quote error for ticker %s: %s", ticker, error)
 
         results.append(
             WatchlistQuoteItem(

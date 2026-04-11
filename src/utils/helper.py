@@ -12,7 +12,10 @@ def dataframeToJson(df: pd.DataFrame) -> list[dict]:
         safe_row = {}
         for key, value in row.items():
             if isinstance(value, (np.integer, np.floating)):
-                safe_row[key] = value.item()
+                v = value.item()
+                safe_row[key] = None if (isinstance(v, float) and np.isnan(v)) else v
+            elif isinstance(value, float) and np.isnan(value):
+                safe_row[key] = None
             elif isinstance(value, (pd.Timestamp, np.datetime64)):
                 safe_row[key] = pd.to_datetime(value).isoformat()
             elif isinstance(value, np.ndarray):

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional, Literal
 
@@ -10,6 +10,7 @@ SIMULATOR_FREQUENCY_DAILY = "daily"
 SIMULATOR_PRICE_MODE_CLOSE = "close"
 SimulatorFrequency = Literal["daily", "twice_daily"]
 SimulatorPriceMode = Literal["open", "close"]
+SimulatorStrategyName = Literal["sma_crossover", "stat_arb_pairs", "auction_liquidity_provider"]
 
 
 class SimulatorCreate(BaseModel):
@@ -37,6 +38,7 @@ class SimulatorResponse(BaseModel):
     max_position_pct: Optional[Decimal]
     max_daily_loss_pct: Optional[Decimal]
     stopped_reason: Optional[str]
+    strategy_name: str = "sma_crossover"
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     tickers: List[str] = []
@@ -54,6 +56,7 @@ class SimulatorSettingsUpdateRequest(BaseModel):
     price_mode: Optional[SimulatorPriceMode] = None
     max_position_pct: Optional[Decimal] = None
     max_daily_loss_pct: Optional[Decimal] = None
+    strategy_name: Optional[SimulatorStrategyName] = None
 
 
 class SimulatorTrackedStockCreate(BaseModel):
@@ -93,6 +96,8 @@ class SimulatorTradeResponse(BaseModel):
     shares: Decimal
     fee: Decimal
     executed_at: Optional[datetime]
+    source: Optional[str] = "live"
+    balance_after: Optional[Decimal] = None
 
     class Config:
         from_attributes = True
@@ -133,3 +138,48 @@ class SimulatorRunResponse(BaseModel):
 class SimulatorRunRequest(BaseModel):
     price_mode: Optional[SimulatorPriceMode] = None
     frequency: Optional[SimulatorFrequency] = None
+
+
+# ---------------------------------------------------------------------------
+# Backtest (Trading Sandbox) schemas
+# ---------------------------------------------------------------------------
+
+class BacktestRequest(BaseModel):
+    start_date: date
+    end_date: date
+    price_mode: Optional[SimulatorPriceMode] = None
+    clear_previous: bool = True
+
+
+class BacktestDayResult(BaseModel):
+    day: date
+    signals_generated: int
+    trades_executed: int
+    cash_after: Decimal
+    skipped_tickers: List[str]
+
+
+class BacktestResult(BaseModel):
+    simulator_id: int
+    start_date: date
+    end_date: date
+    trading_days_run: int
+    total_trades: int
+    starting_cash: Decimal
+    final_cash: Decimal
+    pnl: Decimal
+    pnl_pct: Decimal
+    day_results: List[BacktestDayResult]
+    warnings: List[str]
+
+
+class BacktestLaunchResponse(BaseModel):
+    task_id: str
+    message: str
+
+
+class BacktestStatusResponse(BaseModel):
+    task_id: str
+    status: Literal["pending", "running", "success", "failure"]
+    result: Optional[BacktestResult] = None
+    error: Optional[str] = None

@@ -1,4 +1,4 @@
-from src.api.database.database import Base
+from src.core.database import Base
 from sqlalchemy import Column, ForeignKey, Integer, String, TIMESTAMP, Numeric, text, Index, Enum
 from sqlalchemy.orm import relationship
 
@@ -72,6 +72,7 @@ class Simulator(Base):
     max_position_pct = Column(Numeric(5, 2), nullable=True)
     max_daily_loss_pct = Column(Numeric(5, 2), nullable=True)
     stopped_reason = Column(String, nullable=True)
+    strategy_name = Column(String, nullable=False, server_default=text("'sma_crossover'"))
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
