@@ -26,5 +26,12 @@ class Settings:
 
     frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
 
+    @property
+    def cors_origins(self) -> list[str]:
+        raw = os.getenv("CORS_ORIGINS", "")
+        if raw:
+            return [o.strip() for o in raw.split(",") if o.strip()]
+        return [self.frontend_base_url]
+
 
 settings = Settings()
