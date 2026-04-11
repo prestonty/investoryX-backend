@@ -1,0 +1,18 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# The default command for your Web service
+startCommand = "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Health check ensures zero-downtime deployments
+healthCheckPath = "/health" 
+healthCheckTimeout = 100
+appControlPort = 8000
+
+# Optimization: Tells Railway to ignore these files for builds to speed things up
+[build.watch]
+ignore = ["README.md", ".github/**", "docs/**"]

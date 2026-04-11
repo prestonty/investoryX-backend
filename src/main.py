@@ -57,6 +57,10 @@ app.add_middleware(
 def read_root():
     return {"message": "Hello, FastAPI!"}
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
 # DATABASE ROUTES --------------------------------------------------------------------------------------
 app.include_router(stocks.router)
 app.include_router(users.router)

@@ -1,0 +1,25 @@
+version: "3.9"
+
+# Production compose — used for local prod simulation.
+# On Railway, each service below is a separate Railway service pointing at the same repo.
+# Redis and Postgres are provided by Railway plugins, not defined here.
+
+services:
+  backend:
+    build: .
+    env_file:
+      - .env.prod
+    ports:
+      - "8000:8000"
+
+  celery-worker:
+    build: .
+    env_file:
+      - .env.prod
+    command: ["celery", "-A", "src.celery_app.app", "worker", "-l", "info", "--pool=solo"]
+
+  celery-beat:
+    build: .
+    env_file:
+      - .env.prod
+    command: ["celery", "-A", "src.celery_app.app", "beat", "-l", "info"]
