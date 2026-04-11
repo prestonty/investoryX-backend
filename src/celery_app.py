@@ -3,8 +3,9 @@ from celery import Celery
 from src.trading_engine.schedules.beat import beat_schedule
 
 
-broker_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-result_backend = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+_redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+broker_url = os.getenv("CELERY_BROKER_URL", f"{_redis_url}/0")
+result_backend = os.getenv("CELERY_RESULT_BACKEND", f"{_redis_url}/1")
 timezone = os.getenv("CELERY_TIMEZONE", "America/New_York")
 
 app = Celery(

@@ -21,8 +21,9 @@ per_ticker_limiter = RateLimiter(60, 60.0)
 SCREENER_CACHE_TTL = 300  # 5 minutes
 
 try:
+    _redis_url = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL", "redis://localhost:6379") + "/0"
     _redis = redis.from_url(
-        os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"),
+        _redis_url,
         decode_responses=True,
     )
     _redis.ping()
