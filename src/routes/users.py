@@ -32,7 +32,9 @@ def get_user(
     current_user: Users = Depends(get_current_active_user)
 ):
     """Get a specific user by ID (requires authentication)."""
-    user = db.query(Users).filter(Users.userId == user_id).first()
+    if user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = db.query(Users).filter(Users.user_id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user

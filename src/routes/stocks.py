@@ -89,7 +89,8 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
     """
     logger.info("GET /api/stocks/ticker/%s", ticker)
     try:
-        stock = db.query(Stocks).filter(Stocks.ticker.ilike(f"%{ticker}%")).first()  # case insensitive comparison
+        safe_ticker = ticker.replace("%", r"\%").replace("_", r"\_")
+        stock = db.query(Stocks).filter(Stocks.ticker.ilike(f"%{safe_ticker}%")).first()  # case insensitive comparison
     except Exception as exc:
         logger.exception("DB error looking up ticker %s: %s", ticker, exc)
         raise HTTPException(status_code=500, detail=f"Database error while looking up ticker '{ticker}': {exc}")
@@ -180,17 +181,18 @@ def search_stocks(filter_string: str, db: Session = Depends(get_db)):
         List[StockResponse]: List of matching stocks
     """
     LIMIT = 200  # Max number if items returned
+    safe_filter = filter_string.replace("%", r"\%").replace("_", r"\_")
     stocks = db.query(Stocks).filter(
         or_(
-            Stocks.ticker.ilike(f"%{filter_string}%"),
-            Stocks.company_name.ilike(f"%{filter_string}%")
+            Stocks.ticker.ilike(f"%{safe_filter}%"),
+            Stocks.company_name.ilike(f"%{safe_filter}%")
         )
     ).order_by(
         # Prioritize ticker matches over company name matches
         case(
-            (Stocks.ticker == filter_string.lower(), 0),
-            (Stocks.ticker.ilike(f"{filter_string}%"), 1),
-            (Stocks.company_name.ilike(f"%{filter_string}%"), 2),
+            (Stocks.ticker == safe_filter.lower(), 0),
+            (Stocks.ticker.ilike(f"{safe_filter}%"), 1),
+            (Stocks.company_name.ilike(f"%{safe_filter}%"), 2),
             else_=3
         )
     ).limit(LIMIT).all()  # case insensitive comparison

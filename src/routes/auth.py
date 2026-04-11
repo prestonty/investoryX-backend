@@ -26,6 +26,7 @@ from src.models.users import Users
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 DISABLE_EMAIL_VERIFICATION = os.getenv("DISABLE_EMAIL_VERIFICATION", "false").lower() in ("1", "true", "yes")
+SECURE_COOKIES = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
 class Token(BaseModel):
     access_token: str
@@ -63,19 +64,12 @@ async def login_for_access_token(
     # Check if user exists first
     existing_user = get_user_by_email(db, form_data.username)
 
-    if not existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No account found with this email address",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Now check password
-    user = authenticate_user(db, form_data.username, form_data.password)
+    # Authenticate — use a single generic error to prevent user enumeration
+    user = authenticate_user(db, form_data.username, form_data.password) if existing_user else None
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect password",
+            detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -104,24 +98,22 @@ async def login_for_access_token(
     # Set cookies in the response
     json_response = JSONResponse(content=response)
 
-    # Set access token cookie (httpOnly=False so frontend can read it)
     json_response.set_cookie(
         key="access_token",
         value=access_token,
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # Convert to seconds
-        httponly=False,
-        secure=False,  # Set to True in production with HTTPS
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         path="/"
     )
 
-    # Set refresh token cookie (httpOnly=True for security)
     json_response.set_cookie(
         key="refresh_token",
         value=refresh_token,
-        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,  # Convert to seconds
+        max_age=REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         httponly=True,
-        secure=False,  # Set to True in production with HTTPS
+        secure=SECURE_COOKIES,
         samesite="lax",
         path="/"
     )
@@ -170,10 +162,10 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         return db_user
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Registration failed: {exc}",
+            detail="Registration failed. Please try again.",
         )
 
 
@@ -214,9 +206,9 @@ def refresh_token_endpoint(request: Request, db: Session = Depends(get_db)):
     response.set_cookie(
         key="access_token",
         value=result["access_token"],
-        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,  # Convert to seconds
-        httponly=False,
-        secure=False,  # Set to True in production with HTTPS
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        httponly=True,
+        secure=SECURE_COOKIES,
         samesite="lax",
         path="/"
     )
