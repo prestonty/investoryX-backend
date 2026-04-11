@@ -4,9 +4,6 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import logging
-from alembic.config import Config
-from alembic import command
-
 from src.routes import stocks, users, watchlist, auth, simulator, market_data, email, dev
 
 # Load environment variables
@@ -70,12 +67,5 @@ app.include_router(simulator.router)
 app.include_router(market_data.router)
 app.include_router(email.router)
 app.include_router(dev.router)
-
-# DB Start up after deploying
-@app.on_event("startup")
-async def run_migrations():
-    alembic_cfg = Config("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-
 
 
