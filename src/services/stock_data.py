@@ -20,23 +20,33 @@ per_ticker_limiter = RateLimiter(60, 60.0)
 # Keys are namespaced with "cache:" to avoid collisions with Celery keys
 SCREENER_CACHE_TTL = 300  # 5 minutes
 
-try:
-    _redis_url = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL", "redis://localhost:6379") + "/0"
-    _redis = redis.from_url(
-        _redis_url,
-        decode_responses=True,
-    )
-    _redis.ping()
-except Exception as _e:
-    logger.warning("Redis unavailable, screener caching disabled: %s", _e)
-    _redis = None
+_redis = None
+
+
+def _get_redis():
+    """Lazily connect to Redis on first use so env vars are fully resolved at runtime."""
+    global _redis
+    if _redis is not None:
+        return _redis
+    try:
+        _redis_url = os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        _redis = redis.from_url(
+            _redis_url,
+            decode_responses=True,
+        )
+        _redis.ping()
+    except Exception as e:
+        logger.warning("Redis unavailable, screener caching disabled: %s", e)
+        _redis = None
+    return _redis
 
 
 def _cache_get(key: str):
-    if _redis is None:
+    client = _get_redis()
+    if client is None:
         return None
     try:
-        raw = _redis.get(f"cache:{key}")
+        raw = client.get(f"cache:{key}")
         return json.loads(raw) if raw else None
     except Exception as e:
         logger.warning("Cache get failed for %s: %s", key, e)
@@ -44,10 +54,11 @@ def _cache_get(key: str):
 
 
 def _cache_set(key: str, value, ttl: int = SCREENER_CACHE_TTL):
-    if _redis is None:
+    client = _get_redis()
+    if client is None:
         return
     try:
-        _redis.setex(f"cache:{key}", ttl, json.dumps(value))
+        client.setex(f"cache:{key}", ttl, json.dumps(value))
     except Exception as e:
         logger.warning("Cache set failed for %s: %s", key, e)
 
