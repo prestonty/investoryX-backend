@@ -77,5 +77,7 @@ class Simulator(Base):
 
     tracked_stocks = relationship(
         "SimulatorTrackedStock",
-        
+        back_populates="simulator",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )

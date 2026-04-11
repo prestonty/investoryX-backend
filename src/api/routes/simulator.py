@@ -15,6 +15,7 @@ from src.models.simulator_tracked_stock import SimulatorTrackedStock
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_trade import SimulatorTrade
 from src.models.simulator_cash_ledger import SimulatorCashLedger
+from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_schemas import (
     SimulatorCreate,
     SimulatorResponse,
@@ -432,7 +433,8 @@ def delete_simulator(
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
 
-    # Delete all items associated with this simulator id before deleting the simulator
+    # Delete all items associated with this simulator before deleting the simulator.
+    # This keeps deletion reliable even if DB-level ON DELETE CASCADE is missing.
     db.query(SimulatorTrackedStock).filter(
         SimulatorTrackedStock.simulator_id == simulator_id
     ).delete(synchronize_session=False)
@@ -444,6 +446,9 @@ def delete_simulator(
     ).delete(synchronize_session=False)
     db.query(SimulatorCashLedger).filter(
         SimulatorCashLedger.simulator_id == simulator_id
+    ).delete(synchronize_session=False)
+    db.query(SimulatorSignal).filter(
+        SimulatorSignal.simulator_id == simulator_id
     ).delete(synchronize_session=False)
 
     db.delete(simulator)
