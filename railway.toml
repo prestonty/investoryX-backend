@@ -3,8 +3,8 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-# CHANGED: Using $PORT directly so Railway can inject the correct integer
-startCommand = "uvicorn src.main:app --host 0.0.0.0 --port $PORT"
+# CHANGED: sh -c with double quotes so Railway expands $PORT before passing to uvicorn
+startCommand = "sh -c \"uvicorn src.main:app --host 0.0.0.0 --port $PORT\""
 preDeployCommand = "alembic upgrade head"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
