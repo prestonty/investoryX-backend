@@ -4,6 +4,10 @@ This is the backend repository for InvestoryX - a beginner-friendly stock analyt
 
 Here's the link to [InvestoryX Frontend](https://github.com/prestonty/investoryX)
 
+## Video Demo
+
+Watch video demo here: https://youtu.be/PdQUqJX_cCM
+
 ## Docker Commands
 
 Start the full stack (backend + db + redis):
