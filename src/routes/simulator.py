@@ -56,7 +56,7 @@ def get_user_simulator(
     )
 
 
-@router.post("/", response_model=SimulatorResponse)
+@router.post("", response_model=SimulatorResponse)
 def create_simulator(
     payload: SimulatorCreate,
     db: Session = Depends(get_db),
@@ -79,7 +79,7 @@ def create_simulator(
     db.refresh(simulator)
     return simulator
 
-@router.patch("/rename/{simulator_id}/", response_model=SimulatorResponse)
+@router.patch("/rename/{simulator_id}", response_model=SimulatorResponse)
 def rename_simulator(
     simulator_id: int,
     payload: SimulatorRenameRequest,
@@ -129,7 +129,7 @@ def update_simulator_settings(
     return SimulatorResponse.model_validate(simulator)
 
 
-@router.get("/", response_model=List[SimulatorResponse])
+@router.get("", response_model=List[SimulatorResponse])
 def list_simulators(
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_active_user),
