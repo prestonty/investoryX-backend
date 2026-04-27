@@ -53,6 +53,7 @@ services:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       CELERY_TIMEZONE: ${CELERY_TIMEZONE:-America/New_York}
+      CELERY_BEAT_ENABLED: ${CELERY_BEAT_ENABLED:-true}
     command: ["celery", "-A", "src.celery_app.app", "beat", "-l", "info"]
     depends_on:
       - db

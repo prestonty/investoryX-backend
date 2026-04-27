@@ -29,4 +29,5 @@ app.conf.update(
     result_expires=60 * 60 * 24,
 )
 
-app.conf.beat_schedule = beat_schedule
+_beat_enabled = os.getenv("CELERY_BEAT_ENABLED", "true").lower() in ("1", "true", "yes")
+app.conf.beat_schedule = beat_schedule if _beat_enabled else {}
