@@ -50,6 +50,7 @@ class SimpleMovingAverageStrategy:
                         symbol=symbol,
                         action=SignalAction.HOLD,
                         quantity=Decimal("0"),
+                        price=closes[-1] if closes else Decimal("0"),
                         reason=(
                             f"Not enough history for SMA crossover "
                             f"({len(closes)}/{required_bars} bars)"
@@ -93,6 +94,7 @@ class SimpleMovingAverageStrategy:
                     symbol=symbol,
                     action=action,
                     quantity=quantity,
+                    price=closes[-1],
                     reason=reason,
                     confidence=confidence,
                     strategy_name=self.name,

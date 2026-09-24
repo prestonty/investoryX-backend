@@ -23,7 +23,6 @@ logger = logging.getLogger("investoryx.trading_engine.backtest")
 
 FEE_PER_TRADE = Decimal("0")
 SLIPPAGE_BPS = Decimal("0")
-LOOKBACK_BUFFER_DAYS = 35  # enough history for long SMA windows
 
 
 @dataclass
@@ -46,6 +45,8 @@ class BacktestResult:
     final_cash: Decimal
     pnl: Decimal
     pnl_pct: Decimal
+    holdings_value: Decimal = Decimal("0")
+    final_equity: Decimal | None = None
     day_results: list[BacktestDayResult] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -58,6 +59,10 @@ class BacktestResult:
         d["final_cash"] = str(self.final_cash)
         d["pnl"] = str(self.pnl)
         d["pnl_pct"] = str(self.pnl_pct)
+        d["holdings_value"] = str(self.holdings_value)
+        d["final_equity"] = str(
+            self.final_equity if self.final_equity is not None else self.final_cash
+        )
         for dr in d["day_results"]:
             dr["day"] = dr["day"] if isinstance(dr["day"], str) else dr["day"].isoformat()
             dr["cash_after"] = str(dr["cash_after"])
@@ -122,8 +127,21 @@ class BacktestService:
         if clear_previous:
             self._clear_backtest_rows(session, simulator_id)
 
-        # Fetch all price data in one bulk call (include lookback for strategy history)
-        lookback_start = start_date - timedelta(days=LOOKBACK_BUFFER_DAYS)
+        # Set up strategy evaluation
+        evaluation_service = EvaluationService()
+        strategy_registry = evaluation_service.build_strategy_registry()
+        from .strategy import StrategyService
+        strategy_service = StrategyService(strategy_registry)
+        strategy_name = getattr(simulator, "strategy_name", None) or "sma_crossover"
+        strategy_params: dict = {}
+
+        # Fetch all price data in one bulk call, with enough lookback for the
+        # strategy's longest window to be usable from the first backtest day.
+        long_window = evaluation_service.resolve_long_window(strategy_params, strategy_name)
+        lookback_days = long_window + evaluation_service.resolve_buffer_days(
+            strategy_params, long_window
+        )
+        lookback_start = start_date - timedelta(days=lookback_days)
         logger.info(
             "Fetching price bars for %s from %s to %s",
             tickers,
@@ -141,19 +159,10 @@ class BacktestService:
         # Build ordered list of all bars up to each day (for strategy lookback)
         all_bars_sorted = sorted(all_bars, key=lambda b: (b.symbol, b.day))
 
-        # Set up strategy evaluation
-        evaluation_service = EvaluationService()
-        strategy_registry = evaluation_service.build_strategy_registry()
-        from .strategy import StrategyService
-        strategy_service = StrategyService(strategy_registry)
-        strategy_name = getattr(simulator, "strategy_name", None) or "sma_crossover"
-
         # Ephemeral portfolio state seeded from starting_cash
         starting_cash = Decimal(str(simulator.starting_cash))
         cash = starting_cash
         holdings: dict[str, Decimal] = {}  # symbol -> shares
-
-        strategy_params: dict = {}
 
         trading_days = [
             d
@@ -279,18 +288,26 @@ class BacktestService:
                 skipped_tickers=skipped,
             ))
 
-        # Bulk persist all rows
+        # Bulk persist all rows. The simulator's live cash_balance is intentionally
+        # left untouched; the backtest outcome is reported via the result instead.
         if accumulated_trades:
             session.add_all(accumulated_trades)
         if accumulated_ledger:
             session.add_all(accumulated_ledger)
-
-        # Persist the final cash balance back to the simulator
-        simulator = self._load_simulator(session, simulator_id)
-        simulator.cash_balance = cash
         session.commit()
 
-        pnl = cash - starting_cash
+        # Mark open positions to their last close on or before end_date, so a
+        # backtest that ends holding shares isn't reported as a cash loss.
+        holdings_value = Decimal("0")
+        for symbol, qty in holdings.items():
+            last_close = _last_close_on_or_before(all_bars_sorted, symbol, end_date)
+            if last_close is None:
+                warnings.append(f"{symbol}: no closing price to value {qty} held shares")
+                continue
+            holdings_value += qty * last_close
+        final_equity = cash + holdings_value
+
+        pnl = final_equity - starting_cash
         pnl_pct = (pnl / starting_cash * Decimal("100")).quantize(Decimal("0.01")) if starting_cash else Decimal("0")
 
         return BacktestResult(
@@ -303,6 +320,8 @@ class BacktestService:
             final_cash=cash,
             pnl=pnl,
             pnl_pct=pnl_pct,
+            holdings_value=holdings_value,
+            final_equity=final_equity,
             day_results=day_results,
             warnings=warnings,
         )
@@ -337,6 +356,11 @@ class BacktestService:
             )
         )
         session.commit()
+
+
+def _last_close_on_or_before(bars: list[PriceBar], symbol: str, day: date) -> Decimal | None:
+    closes = [bar.close for bar in bars if bar.symbol == symbol and bar.day <= day]
+    return closes[-1] if closes else None  # bars are sorted by (symbol, day)
 
 
 def _date_range(start: date, end: date):

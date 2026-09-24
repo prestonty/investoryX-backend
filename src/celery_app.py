@@ -18,6 +18,7 @@ app = Celery(
         "src.trading_engine.tasks.execute_paper_trades",
         "src.trading_engine.tasks.reconcile_portfolios",
         "src.trading_engine.tasks.run_backtest",
+        "src.trading_engine.tasks.daily_pipeline",
     ]
 )
 

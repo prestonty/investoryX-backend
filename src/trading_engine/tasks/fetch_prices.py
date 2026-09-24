@@ -4,6 +4,7 @@ from celery import shared_task
 
 from src.trading_engine.services.pricing import (
     get_all_enabled_simulator_tickers,
+    last_completed_trading_day,
     PricingService,
     SqlPriceBarRepository,
     YahooPriceProvider,
@@ -15,16 +16,16 @@ def fetch_prices(tickers: list[str] | None = None, day: str | None = None) -> in
     Fetch and store daily bars for the given tickers and day.
     day is an ISO date string (YYYY-MM-DD).
 
-    If no tickers arguments is specified, it will fetch all tickers that are in the DB to track
+    If no tickers arguments is specified, it will fetch all tickers that are in the DB to track.
+    If no day is specified, it uses the last trading day whose session has closed.
     """
     service = PricingService(provider=YahooPriceProvider(), repo=SqlPriceBarRepository())
     if not tickers:
         tickers = get_all_enabled_simulator_tickers()
-    if not day:
-        day = date.today().isoformat()
+    target_day = date.fromisoformat(day) if day else last_completed_trading_day()
     return service.fetch_and_store_daily_bars(
         symbols=tickers,
-        day=date.fromisoformat(day),
+        day=target_day,
     )
 
 

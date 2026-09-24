@@ -45,6 +45,8 @@ def test_reconcile_single_simulator(monkeypatch: pytest.MonkeyPatch) -> None:
         "simulator_id": 7,
         "reconciled": 1,
         "results": [{"simulator_id": 7}],
+        "failed": 0,
+        "failures": [],
     }
     assert session.committed is True
     assert session.rolled_back is False
@@ -55,8 +57,10 @@ def test_reconcile_all_simulators(monkeypatch: pytest.MonkeyPatch) -> None:
     session = _FakeSession()
 
     class _Service:
-        def reconcile_all(self, session: _FakeSession, limit: int) -> list[_FakeResult]:
-            return [_FakeResult(1), _FakeResult(2)]
+        def reconcile_all(
+            self, session: _FakeSession, limit: int
+        ) -> tuple[list[_FakeResult], list[dict]]:
+            return [_FakeResult(1), _FakeResult(2)], [{"simulator_id": 3, "error": "bad"}]
 
     monkeypatch.setattr(reconcile_module, "SessionLocal", lambda: session)
     monkeypatch.setattr(reconcile_module, "PortfolioService", lambda: _Service())
@@ -67,6 +71,8 @@ def test_reconcile_all_simulators(monkeypatch: pytest.MonkeyPatch) -> None:
         "simulator_id": None,
         "reconciled": 2,
         "results": [{"simulator_id": 1}, {"simulator_id": 2}],
+        "failed": 1,
+        "failures": [{"simulator_id": 3, "error": "bad"}],
     }
     assert session.committed is True
     assert session.rolled_back is False

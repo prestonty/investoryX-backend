@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import date
 from decimal import Decimal
 
 from celery import shared_task
@@ -18,12 +19,14 @@ def record_paper_trades(
     limit: int = 500,
     slippage_bps: str | Decimal = "0",
     fee_per_trade: str | Decimal = "0",
+    day: str | None = None,
 ) -> dict:
     summary = execute_signals(
         simulator_id=simulator_id,
         limit=limit,
         slippage_bps=slippage_bps,
         fee_per_trade=fee_per_trade,
+        day=day,
     )
     return asdict(summary)
 
@@ -33,6 +36,7 @@ def execute_signals(
     limit: int = 500,
     slippage_bps: str | Decimal = "0",
     fee_per_trade: str | Decimal = "0",
+    day: str | date | None = None,
 ) -> ExecutionSummary:
     # Task orchestration only: normalize boundary inputs and delegate business logic.
     service = PaperTradeExecutionService()
@@ -44,6 +48,7 @@ def execute_signals(
             limit=limit,
             slippage_bps=Decimal(str(slippage_bps)),
             fee_per_trade=Decimal(str(fee_per_trade)),
+            trade_day=date.fromisoformat(day) if isinstance(day, str) else day,
         )
     except Exception:
         session.rollback()

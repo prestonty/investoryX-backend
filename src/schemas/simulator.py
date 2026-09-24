@@ -169,6 +169,10 @@ class BacktestResult(BaseModel):
     final_cash: Decimal
     pnl: Decimal
     pnl_pct: Decimal
+    # Market value of shares still held at end_date; pnl = final_equity - starting_cash.
+    # Optional so results computed before these fields existed still parse.
+    holdings_value: Optional[Decimal] = None
+    final_equity: Optional[Decimal] = None
     day_results: List[BacktestDayResult]
     warnings: List[str]
 

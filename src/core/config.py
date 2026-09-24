@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,6 +20,10 @@ class Settings:
 
     stock_search_limit: int = 200
     screener_cache_ttl: int = 300  # seconds
+
+    # Paper-trading execution costs, applied the same way by every trading path.
+    sim_fee_per_trade: Decimal = Decimal(os.getenv("SIM_FEE_PER_TRADE", "0"))
+    sim_slippage_bps: Decimal = Decimal(os.getenv("SIM_SLIPPAGE_BPS", "0"))
 
     debug_errors: bool = os.getenv("DEBUG_ERRORS", "false").lower() in ("1", "true", "yes")
     disable_email_verification: bool = os.getenv("DISABLE_EMAIL_VERIFICATION", "false").lower() in ("1", "true", "yes")

@@ -31,14 +31,18 @@ def reconcile_portfolios(
                 "simulator_id": simulator_id,
                 "reconciled": 1,
                 "results": [result.to_dict()],
+                "failed": 0,
+                "failures": [],
             }
 
-        results = service.reconcile_all(session=session, limit=limit)
+        results, failures = service.reconcile_all(session=session, limit=limit)
         session.commit()
         return {
             "simulator_id": None,
             "reconciled": len(results),
             "results": [result.to_dict() for result in results],
+            "failed": len(failures),
+            "failures": failures,
         }
     except Exception:
         session.rollback()

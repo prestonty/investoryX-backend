@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from src.core.database import SessionLocal
 from src.models.price_bar import PriceBar as PriceBarModel
-from src.models.simulator import Simulator
+from src.models.simulator import SIMULATOR_STATUS_PAUSED, Simulator
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
@@ -20,12 +20,11 @@ from src.trading_engine.strategies import (
 from .actions import SignalAction
 from .execution import SignalExecutionStatus
 from .portfolio import PortfolioSnapshot, Position
-from .pricing import PriceBar
+from .pricing import MARKET_CLOSE, MARKET_TZ, PriceBar, last_completed_trading_day
 from .strategy import (
     Signal,
     StrategyRegistry,
     StrategyService,
-    SimpleMovingAverageStrategy,
     PairsTradingStrategy,
     AuctionLiquidityStrategy,
 )
@@ -33,6 +32,7 @@ from .strategy import (
 STATUS_OK = "ok"
 STATUS_ERROR = "error"
 STATUS_SKIPPED_PRICE_DATA_MISSING = "skipped_price_data_missing"
+STATUS_SKIPPED_ALREADY_EVALUATED = "skipped_already_evaluated"
 
 
 @dataclass
@@ -89,9 +89,12 @@ class EvaluationService:
         self,
         user_id: int | None = None,
         params: dict | None = None,
+        as_of_day: date | None = None,
+        simulator_id: int | None = None,
     ) -> EvaluationSummary:
         params = params or {}
-        targets = self.load_target_portfolios(user_id)
+        as_of_day = as_of_day or last_completed_trading_day()
+        targets = self.load_target_portfolios(user_id, simulator_id)
         strategy_registry = self.build_strategy_registry()
         strategy_service = StrategyService(strategy_registry)
         # strategy_name can be overridden globally via params, otherwise each simulator uses its own
@@ -108,11 +111,15 @@ class EvaluationService:
                 strategy_service=strategy_service,
                 strategy_name=strategy_name,
                 params=params,
+                as_of_day=as_of_day,
             )
             simulator_results.append(result.to_dict())
             if result.status == STATUS_OK:
                 stats.total_signals += int(result.signals_count)
-            elif result.status == STATUS_SKIPPED_PRICE_DATA_MISSING:
+            elif result.status in (
+                STATUS_SKIPPED_PRICE_DATA_MISSING,
+                STATUS_SKIPPED_ALREADY_EVALUATED,
+            ):
                 stats.skipped += 1
             elif result.status == STATUS_ERROR:
                 stats.errors += 1
@@ -133,13 +140,19 @@ class EvaluationService:
         strategy_service: StrategyService,
         strategy_name: str,
         params: dict,
+        as_of_day: date,
     ) -> SimulatorEvaluationResult:
         try:
+            if self.has_signals_for_day(simulator_id, as_of_day):
+                return self._build_skipped_result(
+                    simulator_id, STATUS_SKIPPED_ALREADY_EVALUATED
+                )
             snapshot = self.load_portfolio_snapshot(simulator_id)
             prices = self.load_price_history_for_portfolio(
                 simulator_id,
                 params,
                 strategy_name,
+                as_of_day,
             )
             if not prices:
                 return self._build_skipped_result(simulator_id)
@@ -165,10 +178,14 @@ class EvaluationService:
             signals_count=signals_count,
         )
 
-    def _build_skipped_result(self, simulator_id: int) -> SimulatorEvaluationResult:
+    def _build_skipped_result(
+        self,
+        simulator_id: int,
+        status: str = STATUS_SKIPPED_PRICE_DATA_MISSING,
+    ) -> SimulatorEvaluationResult:
         return SimulatorEvaluationResult(
             simulator_id=simulator_id,
-            status=STATUS_SKIPPED_PRICE_DATA_MISSING,
+            status=status,
             signals_count=0,
         )
 
@@ -181,7 +198,11 @@ class EvaluationService:
             error=error,
         )
 
-    def load_target_portfolios(self, user_id: int | None = None) -> list[Simulator]:
+    def load_target_portfolios(
+        self,
+        user_id: int | None = None,
+        simulator_id: int | None = None,
+    ) -> list[Simulator]:
         session = SessionLocal()
         try:
             stmt = (
@@ -191,12 +212,36 @@ class EvaluationService:
                     SimulatorTrackedStock.simulator_id == Simulator.simulator_id,
                 )
                 .where(SimulatorTrackedStock.enabled.is_(True))
+                .where(Simulator.status != SIMULATOR_STATUS_PAUSED)
                 .distinct()
                 .order_by(Simulator.simulator_id)
             )
             if user_id is not None:
                 stmt = stmt.where(Simulator.user_id == user_id)
+            if simulator_id is not None:
+                stmt = stmt.where(Simulator.simulator_id == simulator_id)
             return session.execute(stmt).scalars().all()
+        finally:
+            session.close()
+
+    def has_signals_for_day(self, simulator_id: int, as_of_day: date) -> bool:
+        """True if this simulator was already evaluated on as_of_day's prices.
+
+        Evaluation for a day can only run after that day's close, so any signal
+        created at or after the close means the day has been evaluated. This
+        keeps the scheduled pipeline, manual runs and dev runs from creating
+        duplicate signals (and duplicate trades) for the same prices.
+        """
+        day_close = datetime.combine(as_of_day, MARKET_CLOSE, tzinfo=MARKET_TZ)
+        session = SessionLocal()
+        try:
+            stmt = (
+                select(SimulatorSignal.signal_id)
+                .where(SimulatorSignal.simulator_id == simulator_id)
+                .where(SimulatorSignal.created_at >= day_close.astimezone(timezone.utc))
+                .limit(1)
+            )
+            return session.execute(stmt).first() is not None
         finally:
             session.close()
 
@@ -243,6 +288,7 @@ class EvaluationService:
         simulator_id: int,
         params: dict,
         strategy_name: str,
+        as_of_day: date,
     ) -> list[PriceBar]:
         session = SessionLocal()
         try:
@@ -265,7 +311,7 @@ class EvaluationService:
 
             long_window = self.resolve_long_window(params, strategy_name)
             buffer_days = self.resolve_buffer_days(params, long_window)
-            end_day = date.today()
+            end_day = as_of_day
             start_day = end_day - timedelta(days=long_window + buffer_days)
 
             prices_stmt = (
@@ -277,7 +323,7 @@ class EvaluationService:
                 .order_by(PriceBarModel.symbol, PriceBarModel.day)
             )
             rows = session.execute(prices_stmt).scalars().all()
-            return [
+            bars = [
                 PriceBar(
                     symbol=row.symbol,
                     day=row.day,
@@ -290,8 +336,18 @@ class EvaluationService:
                 )
                 for row in rows
             ]
+            return self.filter_to_fresh_symbols(bars, as_of_day)
         finally:
             session.close()
+
+    def filter_to_fresh_symbols(self, bars: list[PriceBar], as_of_day: date) -> list[PriceBar]:
+        """Drop every symbol that has no bar for as_of_day.
+
+        Without today's bar a strategy would re-evaluate yesterday's prices and
+        repeat yesterday's decision, so stale symbols must not be evaluated.
+        """
+        fresh_symbols = {bar.symbol for bar in bars if bar.day == as_of_day}
+        return [bar for bar in bars if bar.symbol in fresh_symbols]
 
     def build_strategy_registry(self) -> StrategyRegistry:
         registry = StrategyRegistry()

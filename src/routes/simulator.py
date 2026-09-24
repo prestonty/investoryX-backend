@@ -8,10 +8,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from src.core.database import get_db
 from src.core.security import get_current_active_user
-from src.services.stock_data import getStockHistory
-from src.data_types.history import Period, Interval
 from src.models.users import Users
-from src.models.simulator import Simulator
+from src.models.simulator import SIMULATOR_STATUS_PAUSED, Simulator
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_trade import SimulatorTrade
@@ -36,6 +34,12 @@ from src.schemas.simulator import (
     BacktestStatusResponse,
     BacktestResult as BacktestResultSchema,
 )
+from src.trading_engine.services.evaluation import (
+    STATUS_ERROR,
+    STATUS_SKIPPED_ALREADY_EVALUATED,
+    STATUS_SKIPPED_PRICE_DATA_MISSING,
+)
+from src.trading_engine.tasks.daily_pipeline import MissingPriceDataError, run_pipeline
 
 
 router = APIRouter(prefix="/api/simulator", tags=["simulator"])
@@ -291,127 +295,40 @@ def run_simulator(
             frequency=frequency,
         )
 
-    fee_rate = Decimal("0.001")
-    trades_executed = 0
-
-    for tracked in tracked_stocks:
-        ticker = tracked.ticker.upper()
-        history = getStockHistory(
-            ticker,
-            period=Period.DAY_5,
-            interval=Interval.DAY_1,
-        )
-        rows = history.get("data", []) if isinstance(history, dict) else []
-        if not rows:
-            continue
-        latest = rows[-1]
-        price_key = "open" if price_mode == "open" else "close"
-        price = latest.get(price_key)
-        if price is None:
-            continue
-        current_price = Decimal(str(price))
-        if current_price <= 0:
-            continue
-
-        position = (
-            db.query(SimulatorPosition)
-            .filter(
-                SimulatorPosition.simulator_id == simulator_id,
-                SimulatorPosition.ticker == ticker,
-            )
-            .first()
+    if simulator.status == SIMULATOR_STATUS_PAUSED:
+        db.commit()
+        db.refresh(simulator)
+        return SimulatorRunResponse(
+            message="Simulator is paused",
+            trades_executed=0,
+            cash_balance=Decimal(str(simulator.cash_balance)),
+            price_mode=price_mode,
+            frequency=frequency,
         )
 
-        if not position or Decimal(str(position.shares)) <= Decimal("0"):
-            desired_investment = (
-                Decimal(str(simulator.starting_cash))
-                * Decimal(str(tracked.target_allocation))
-                / Decimal("100")
-            )
-            available_cash = Decimal(str(simulator.cash_balance))
-            buy_amount = min(desired_investment, available_cash)
-            if buy_amount <= 0:
-                continue
+    # Persist setting changes before the engine runs in its own sessions.
+    db.commit()
 
-            total_cost = buy_amount * (Decimal("1") + fee_rate)
-            if total_cost > available_cash:
-                buy_amount = available_cash / (Decimal("1") + fee_rate)
-                if buy_amount <= 0:
-                    continue
-                total_cost = buy_amount * (Decimal("1") + fee_rate)
+    # Same fetch -> evaluate -> execute -> reconcile path as the scheduled pipeline,
+    # scoped to this simulator, so every run follows the simulator's strategy.
+    # Live fills always use the close: filling at the open after seeing the
+    # close would be lookahead bias. price_mode="open" only applies to backtests.
+    try:
+        result = run_pipeline(simulator_id=simulator_id)
+    except MissingPriceDataError as exc:
+        raise HTTPException(status_code=503, detail=f"Price data unavailable: {exc}")
 
-            shares = buy_amount / current_price
-            fee = buy_amount * fee_rate
-
-            position = SimulatorPosition(
-                simulator_id=simulator_id,
-                ticker=ticker,
-                shares=shares,
-                avg_cost=current_price,
-            )
-            db.add(position)
-
-            simulator.cash_balance = Decimal(str(simulator.cash_balance)) - total_cost
-            db.add(
-                SimulatorTrade(
-                    simulator_id=simulator_id,
-                    ticker=ticker,
-                    side="buy",
-                    price=current_price,
-                    shares=shares,
-                    fee=fee,
-                    balance_after=Decimal(str(simulator.cash_balance)),
-                )
-            )
-            db.add(
-                SimulatorCashLedger(
-                    simulator_id=simulator_id,
-                    delta=-total_cost,
-                    reason="buy",
-                    balance_after=simulator.cash_balance,
-                )
-            )
-            trades_executed += 1
-            continue
-
-        avg_cost = Decimal(str(position.avg_cost))
-        if avg_cost <= 0:
-            continue
-
-        pct_change = (current_price - avg_cost) / avg_cost
-        should_sell = pct_change >= Decimal("0.05") or pct_change <= Decimal("-0.05")
-        if not should_sell:
-            continue
-
-        shares = Decimal(str(position.shares))
-        proceeds = shares * current_price
-        fee = proceeds * fee_rate
-        net = proceeds - fee
-
-        simulator.cash_balance = Decimal(str(simulator.cash_balance)) + net
-        db.add(
-            SimulatorTrade(
-                simulator_id=simulator_id,
-                ticker=ticker,
-                side="sell",
-                price=current_price,
-                shares=shares,
-                fee=fee,
-                balance_after=Decimal(str(simulator.cash_balance)),
-            )
-        )
-        db.add(
-            SimulatorCashLedger(
-                simulator_id=simulator_id,
-                delta=net,
-                reason="sell",
-                balance_after=simulator.cash_balance,
-            )
-        )
-
-        position.shares = Decimal("0")
-        position.avg_cost = Decimal("0")
-        trades_executed += 1
+    trades_executed = int(result["trades_executed"]["executed"])
+    sim_results = result["signals"]["simulator_results"]
+    eval_status = sim_results[0]["status"] if sim_results else None
+    if eval_status == STATUS_SKIPPED_ALREADY_EVALUATED:
+        message = f"Already evaluated for {result['day']}"
+    elif eval_status == STATUS_SKIPPED_PRICE_DATA_MISSING:
+        message = f"No price data for {result['day']}"
+    elif eval_status == STATUS_ERROR:
+        message = f"Strategy evaluation failed: {sim_results[0].get('error')}"
+    else:
+        message = "Simulator run completed"
 
     now_utc = datetime.now(timezone.utc)
     simulator.last_run_at = now_utc
@@ -425,7 +342,7 @@ def run_simulator(
     db.refresh(simulator)
 
     return SimulatorRunResponse(
-        message="Simulator run completed",
+        message=message,
         trades_executed=trades_executed,
         cash_balance=Decimal(str(simulator.cash_balance)),
         price_mode=price_mode,

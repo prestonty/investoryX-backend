@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Protocol
-from sqlalchemy import select
+import logging
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from src.models.simulator import Simulator
@@ -12,6 +14,10 @@ from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_trade import SimulatorTrade
 
 from .actions import SignalAction
+
+logger = logging.getLogger("investoryx.trading_engine.portfolio")
+
+BACKTEST_SOURCE = "backtest"
 
 
 @dataclass(frozen=True)
@@ -137,9 +143,17 @@ class SqlPortfolioRepository:
         session: Session,
         simulator_id: int,
     ) -> list[ExecutedTrade]:
+        # Backtest trades are hypothetical and must never affect live cash/positions.
+        # NULL source predates the column and is treated as live.
         stmt = (
             select(SimulatorTrade)
             .where(SimulatorTrade.simulator_id == simulator_id)
+            .where(
+                or_(
+                    SimulatorTrade.source.is_(None),
+                    SimulatorTrade.source != BACKTEST_SOURCE,
+                )
+            )
             .order_by(SimulatorTrade.executed_at, SimulatorTrade.trade_id)
         )
         rows = session.execute(stmt).scalars().all()
@@ -282,13 +296,23 @@ class PortfolioService:
         session: Session,
         simulator_ids: list[int] | None = None,
         limit: int | None = None,
-    ) -> list[PortfolioReconciliationResult]:
+    ) -> tuple[list[PortfolioReconciliationResult], list[dict]]:
+        """Reconcile each simulator in its own savepoint so one failure can't block the rest."""
         if simulator_ids is None:
             simulator_ids = self._repo.list_simulator_ids(session=session, limit=limit)
-        return [
-            self.reconcile_simulator(session=session, simulator_id=simulator_id)
-            for simulator_id in simulator_ids
-        ]
+
+        results: list[PortfolioReconciliationResult] = []
+        failures: list[dict] = []
+        for simulator_id in simulator_ids:
+            try:
+                with session.begin_nested():
+                    results.append(
+                        self.reconcile_simulator(session=session, simulator_id=simulator_id)
+                    )
+            except Exception as exc:
+                logger.exception("Reconciliation failed for simulator_id=%s", simulator_id)
+                failures.append({"simulator_id": simulator_id, "error": str(exc)})
+        return results, failures
 
     def _replay_trades(
         self,

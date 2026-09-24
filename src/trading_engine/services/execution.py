@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 
@@ -10,13 +10,17 @@ from sqlalchemy.orm import Session
 
 from src.models.price_bar import PriceBar as PriceBarModel
 from src.models.simulator import Simulator
+from src.models.simulator_cash_ledger import SimulatorCashLedger
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_trade import SimulatorTrade
 
 from .actions import SignalAction
 from .portfolio import PortfolioSnapshot
+from .pricing import last_completed_trading_day
 from .strategy import Signal
+
+LIVE_SOURCE = "live"
 
 
 class SignalExecutionStatus(str, Enum):
@@ -92,6 +96,7 @@ class TradeIntent:
 class ExecutionContext:
     session: Session
     now: datetime
+    trade_day: date
     fee_per_trade: Decimal
     slippage_bps: Decimal
     cash_by_sim: dict[int, Decimal]
@@ -108,7 +113,9 @@ class PaperTradeExecutionService:
         limit: int = 500,
         slippage_bps: Decimal = Decimal("0"),
         fee_per_trade: Decimal = Decimal("0"),
+        trade_day: date | None = None,
     ) -> ExecutionSummary:
+        """Fill pending signals at trade_day's close (defaults to the last completed trading day)."""
         pending = self._load_pending_signals(
             session=session,
             simulator_id=simulator_id,
@@ -121,6 +128,7 @@ class PaperTradeExecutionService:
         context = ExecutionContext(
             session=session,
             now=datetime.now(timezone.utc),
+            trade_day=trade_day or last_completed_trading_day(),
             fee_per_trade=fee_per_trade,
             slippage_bps=slippage_bps,
             cash_by_sim=self._load_cash_by_simulator(session, simulator_ids),
@@ -136,6 +144,7 @@ class PaperTradeExecutionService:
             outcome, trade = self._process_signal(signal=signal, context=context)
             if trade is not None:
                 session.add(trade)
+                session.add(self._to_ledger_entry(trade))
                 trades_created += 1
             if outcome is SignalOutcome.EXECUTED:
                 executed += 1
@@ -199,12 +208,13 @@ class PaperTradeExecutionService:
             holdings[sim_id][symbol] = Decimal(str(row.shares))
         return holdings
 
-    def _get_latest_close(self, session: Session, symbol: str) -> Decimal | None:
+    def _get_close_for_day(self, session: Session, symbol: str, day: date) -> Decimal | None:
+        # Only fill at the target day's close; an older bar would mean trading on stale prices.
         stmt = (
             select(PriceBarModel)
             .where(PriceBarModel.symbol == symbol)
             .where(PriceBarModel.source == "yfinance")
-            .order_by(PriceBarModel.day.desc())
+            .where(PriceBarModel.day == day)
             .limit(1)
         )
         row = session.execute(stmt).scalars().first()
@@ -254,9 +264,13 @@ class PaperTradeExecutionService:
             return SignalOutcome.SKIPPED, None
 
         symbol = signal.ticker.strip().upper()
-        price = self._get_latest_close(context.session, symbol)
+        price = self._get_close_for_day(context.session, symbol, context.trade_day)
         if price is None:
-            self._mark_failed(signal, f"no latest price for ticker={symbol}", context.now)
+            self._mark_failed(
+                signal,
+                f"no price for ticker={symbol} on {context.trade_day.isoformat()}",
+                context.now,
+            )
             return SignalOutcome.FAILED, None
 
         sim_id = int(signal.simulator_id)
@@ -404,5 +418,17 @@ class PaperTradeExecutionService:
             shares=quantity,
             fee=fee,
             executed_at=executed_at,
+            source=LIVE_SOURCE,
             balance_after=balance_after,
+        )
+
+    def _to_ledger_entry(self, trade: SimulatorTrade) -> SimulatorCashLedger:
+        gross = trade.price * trade.shares
+        delta = -(gross + trade.fee) if trade.side == SignalAction.BUY.value else gross - trade.fee
+        return SimulatorCashLedger(
+            simulator_id=trade.simulator_id,
+            delta=delta,
+            reason=trade.side,
+            balance_after=trade.balance_after,
+            source=LIVE_SOURCE,
         )

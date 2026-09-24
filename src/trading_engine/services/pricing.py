@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from functools import lru_cache
 from typing import Protocol
+from zoneinfo import ZoneInfo
 import logging
 
 import pandas as pd
 import yfinance as yf
+from pandas.tseries.holiday import (
+    AbstractHolidayCalendar,
+    GoodFriday,
+    Holiday,
+    USLaborDay,
+    USMartinLutherKingJr,
+    USMemorialDay,
+    USPresidentsDay,
+    USThanksgivingDay,
+    nearest_workday,
+    sunday_to_monday,
+)
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 
@@ -67,12 +81,14 @@ class PricingService:
         return self._repo.get_latest_bars(symbols, day)
 
 
-def get_all_enabled_simulator_tickers() -> list[str]:
+def get_all_enabled_simulator_tickers(simulator_id: int | None = None) -> list[str]:
     session = SessionLocal()
     try:
         stmt = select(SimulatorTrackedStock.ticker).where(
             SimulatorTrackedStock.enabled.is_(True)
         )
+        if simulator_id is not None:
+            stmt = stmt.where(SimulatorTrackedStock.simulator_id == simulator_id)
         rows = session.execute(stmt).scalars().all()
         tickers = {
             ticker.strip().upper()
@@ -363,6 +379,45 @@ def _normalize_symbols(symbols: list[str]) -> list[str]:
     return [symbol.strip().upper() for symbol in symbols if symbol and symbol.strip()]
 
 
+MARKET_TZ = ZoneInfo("America/New_York")
+MARKET_CLOSE = time(16, 0)
+
+
+class _NyseHolidayCalendar(AbstractHolidayCalendar):
+    """Regular NYSE full-day closures (ad-hoc closures are not modelled)."""
+
+    rules = [
+        # A Saturday New Year's Day is not observed on the preceding Friday.
+        Holiday("New Year's Day", month=1, day=1, observance=sunday_to_monday),
+        USMartinLutherKingJr,
+        USPresidentsDay,
+        GoodFriday,
+        USMemorialDay,
+        Holiday("Juneteenth", month=6, day=19, start_date="2022-01-01", observance=nearest_workday),
+        Holiday("Independence Day", month=7, day=4, observance=nearest_workday),
+        USLaborDay,
+        USThanksgivingDay,
+        Holiday("Christmas Day", month=12, day=25, observance=nearest_workday),
+    ]
+
+
+@lru_cache(maxsize=32)
+def _nyse_holidays(year: int) -> frozenset[date]:
+    days = _NyseHolidayCalendar().holidays(start=f"{year}-01-01", end=f"{year}-12-31")
+    return frozenset(day.date() for day in days)
+
+
 def _is_trading_day(day: date) -> bool:
-    return day.weekday() < 5
+    return day.weekday() < 5 and day not in _nyse_holidays(day.year)
+
+
+def last_completed_trading_day(now: datetime | None = None) -> date:
+    """Most recent trading day whose regular session has closed, in US/Eastern time."""
+    now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
+    day = now_et.date()
+    if now_et.time() < MARKET_CLOSE:
+        day -= timedelta(days=1)
+    while not _is_trading_day(day):
+        day -= timedelta(days=1)
+    return day
 

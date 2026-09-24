@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 
+from src.models.simulator_cash_ledger import SimulatorCashLedger
+from src.models.simulator_signal import SimulatorSignal
+from src.models.simulator_trade import SimulatorTrade
 from src.trading_engine.services.execution import ExecutionSummary
 import src.trading_engine.tasks.execute_paper_trades as execute_module
 
@@ -57,11 +61,12 @@ def test_execute_signals_normalizes_decimals_and_closes_session(
     monkeypatch.setattr(execute_module, "SessionLocal", lambda: session)
     monkeypatch.setattr(execute_module, "PaperTradeExecutionService", lambda: _Service())
 
-    execute_module.execute_signals(slippage_bps="12.5", fee_per_trade="1.25")
+    execute_module.execute_signals(slippage_bps="12.5", fee_per_trade="1.25", day="2024-03-08")
 
     assert captured["session"] is session
     assert captured["slippage_bps"] == Decimal("12.5")
     assert captured["fee_per_trade"] == Decimal("1.25")
+    assert captured["trade_day"] == date(2024, 3, 8)
     assert session.rolled_back is False
     assert session.closed is True
 
@@ -81,3 +86,49 @@ def test_execute_signals_rolls_back_on_error(monkeypatch: pytest.MonkeyPatch) ->
 
     assert session.rolled_back is True
     assert session.closed is True
+
+
+TRADE_DAY = date(2024, 3, 8)
+
+
+def _pending_buy(simulator_id: int = 1) -> SimulatorSignal:
+    return SimulatorSignal(
+        simulator_id=simulator_id,
+        ticker="AAPL",
+        action="buy",
+        quantity=Decimal("2"),
+        reason="test",
+        confidence=Decimal("1"),
+        strategy_name="sma_crossover",
+        status="pending",
+    )
+
+
+def test_signal_fails_without_bar_for_trade_day(db) -> None:
+    db.simulator(1)
+    db.bars("AAPL", [TRADE_DAY - timedelta(days=1)])  # only yesterday's (stale) price
+    db.add(_pending_buy())
+
+    summary = execute_module.execute_signals(day=TRADE_DAY)
+
+    assert summary.failed == 1 and summary.trades_created == 0
+    [signal] = db.all(SimulatorSignal)
+    assert signal.status == "failed"
+    assert "on 2024-03-08" in signal.execution_error
+    assert db.all(SimulatorTrade) == []
+
+
+def test_executed_trade_writes_ledger_row(db) -> None:
+    db.simulator(1, cash="1000")
+    db.bars("AAPL", [TRADE_DAY], close="100")
+    db.add(_pending_buy())
+
+    summary = execute_module.execute_signals(day=TRADE_DAY, fee_per_trade="1")
+
+    assert summary.executed == 1
+    [trade] = db.all(SimulatorTrade)
+    assert (trade.price, trade.shares, trade.source) == (Decimal("100"), Decimal("2"), "live")
+    [ledger] = db.all(SimulatorCashLedger)
+    assert ledger.delta == Decimal("-201")
+    assert ledger.balance_after == Decimal("799")
+    assert (ledger.reason, ledger.source) == ("buy", "live")
