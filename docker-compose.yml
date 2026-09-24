@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16
@@ -11,6 +9,25 @@ services:
       - "5433:5432"
     volumes:
       - investoryx_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot setup: applies migrations, then seeds the stocks table if it's empty
+  migrate:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    command: ["sh", "-c", "alembic upgrade head && python -m src.services.seed --if-empty"]
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
 
   backend:
     build: .
@@ -27,8 +44,10 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - db
-      - redis
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   celery-worker:
     build: .
@@ -40,9 +59,13 @@ services:
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
       CELERY_TIMEZONE: ${CELERY_TIMEZONE:-America/New_York}
     command: ["celery", "-A", "src.celery_app.app", "worker", "-l", "info", "--pool=solo"]
+    volumes:
+      - .:/app
     depends_on:
-      - db
-      - redis
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   celery-beat:
     build: .
@@ -55,9 +78,13 @@ services:
       CELERY_TIMEZONE: ${CELERY_TIMEZONE:-America/New_York}
       CELERY_BEAT_ENABLED: ${CELERY_BEAT_ENABLED:-true}
     command: ["celery", "-A", "src.celery_app.app", "beat", "-l", "info"]
+    volumes:
+      - .:/app
     depends_on:
-      - db
-      - redis
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   redis:
     image: redis:7

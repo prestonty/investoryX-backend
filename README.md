@@ -10,11 +10,36 @@ Watch video demo here: https://youtu.be/PdQUqJX_cCM
 
 ## Docker Commands
 
-Start the full stack (backend + db + redis):
+Start the full stack with one command:
 
 ```bash
 docker compose up --build
 ```
+
+This starts:
+
+| Service           | What it does                                                      | Port   |
+| ----------------- | ----------------------------------------------------------------- | ------ |
+| `db`              | Postgres 16                                                       | `5433` |
+| `redis`           | Celery broker/result backend + stock data cache                   | `6379` |
+| `migrate`         | One-shot: runs `alembic upgrade head`, seeds stocks if table empty | –      |
+| `backend`         | FastAPI (auto-reloads on code changes)                            | `8000` |
+| `celery-worker`   | Celery worker                                                     | –      |
+| `celery-beat`     | Celery Beat scheduler                                             | –      |
+| `redis-commander` | Web UI for inspecting Redis                                       | `8081` |
+
+`backend`, `celery-worker` and `celery-beat` wait for `migrate` to finish, so the
+schema is always up to date before the app starts. `migrate` exiting with code 0
+is expected.
+
+Your source code is mounted into the backend and Celery containers. The backend
+reloads automatically; Celery does not, so after editing tasks run:
+
+```bash
+docker compose restart celery-worker celery-beat
+```
+
+The frontend is not part of this stack. Run it from the frontend repo with `npm run dev`.
 
 Start in the background:
 
@@ -176,6 +201,8 @@ docker compose up
 ### Populate Stock Table
 
 The search features read from the db and to use this feature, you must populate the db with stocks via python script.
+
+With Docker this happens automatically on first startup (the `migrate` service runs the seed when the stocks table is empty). To re-run it manually:
 
 Run locally with Poetry:
 

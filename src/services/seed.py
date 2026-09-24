@@ -1,6 +1,7 @@
 import csv
 import requests
 import io
+import sys
 from sqlalchemy.orm import Session
 from src.core.database import SessionLocal
 from src.models.stocks import Stocks
@@ -77,7 +78,20 @@ def parse_csv_and_insert_stocks(csv_content):
     finally:
         db.close()
 
+def stocks_table_is_empty():
+    """Check whether the stocks table has any rows"""
+    db = SessionLocal()
+    try:
+        return db.query(Stocks).first() is None
+    finally:
+        db.close()
+
 def main():
+    # --if-empty lets docker compose run the seed on every startup without re-downloading
+    if "--if-empty" in sys.argv and not stocks_table_is_empty():
+        print("Stocks table already populated, skipping seed")
+        return
+
     print("Downloading stock data from Alpha Vantage...")
     csv_content = download_csv_from_alphavantage()
 
