@@ -31,6 +31,16 @@ EMAIL_TOKEN_EXPIRE_MINUTES = int(os.getenv("EMAIL_TOKEN_EXPIRE_MINUTES", "1440")
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
 
+# Every token carries a "type" claim so one kind can't be used as another
+# (e.g. an emailed verification link or a refresh cookie as an API bearer token).
+TOKEN_TYPE_ACCESS = "access"
+TOKEN_TYPE_REFRESH = "refresh"
+TOKEN_TYPE_VERIFY_EMAIL = "verify_email"
+
+# Verified against when the email doesn't exist, so login takes the same time
+# either way and response timing can't reveal which emails have accounts.
+_DUMMY_PASSWORD_HASH = pwd_context.hash("not-a-real-password")
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify a plain password against its hash."""
     return pwd_context.verify(plain_password, hashed_password)
@@ -51,6 +61,7 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[Users]
     """Authenticate a user with email and password."""
     user = get_user_by_email(db, email)
     if not user:
+        verify_password(password, _DUMMY_PASSWORD_HASH)
         return None
     if not verify_password(password, user.password):
         return None
@@ -58,11 +69,15 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[Users]
         return None  # Prevent inactive users from logging in
     return user
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Create a JWT access token."""
+def create_access_token(
+    data: dict,
+    expires_delta: Optional[timedelta] = None,
+    token_type: str = TOKEN_TYPE_ACCESS,
+) -> str:
+    """Create a JWT signed with SECRET_KEY (an API access token by default)."""
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": token_type})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -70,7 +85,7 @@ def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) 
     """Create a JWT refresh token."""
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(days=7))
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": TOKEN_TYPE_REFRESH})
     encoded_jwt = jwt.encode(to_encode, REFRESH_SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -78,9 +93,13 @@ def decode_refresh_token(token: str) -> dict:
     """Decode and validate a refresh token."""
     try:
         payload = jwt.decode(token, REFRESH_SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    # Refresh tokens issued before the "type" claim existed have no type; accept
+    # them until they expire (REFRESH_TOKEN_EXPIRE_DAYS) so nobody is logged out.
+    if payload.get("type") not in (TOKEN_TYPE_REFRESH, None):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
+    return payload
 
 def refresh_access_token(request: Request, db: Session):
     """Validate refresh token and return a new access token."""
@@ -111,7 +130,11 @@ def create_email_verification_token(user_id: int, expires_minutes: Optional[int]
     """Create a JWT token specifically for email verification."""
     minutes = expires_minutes if expires_minutes is not None else EMAIL_TOKEN_EXPIRE_MINUTES
     expire = timedelta(minutes=minutes)
-    return create_access_token({"sub": str(user_id), "scope": "verify_email"}, expire)
+    return create_access_token(
+        {"sub": str(user_id), "scope": "verify_email"},
+        expire,
+        token_type=TOKEN_TYPE_VERIFY_EMAIL,
+    )
 
 def verify_token(token: str) -> Optional[dict]:
     """Verify and decode a JWT token."""
@@ -143,6 +166,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 
     payload = verify_token(token)
     if payload is None:
+        raise credentials_exception
+    # Only access tokens authenticate API calls. Older untyped access tokens are
+    # rejected too; the frontend then refreshes and receives a typed one.
+    if payload.get("type") != TOKEN_TYPE_ACCESS:
         raise credentials_exception
 
     user_id: int = payload.get("sub")

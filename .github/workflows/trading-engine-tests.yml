@@ -26,5 +26,5 @@ jobs:
       - name: Install pytest
         run: poetry run python -m pip install pytest
 
-      - name: Run trading engine tests
-        run: poetry run pytest tests/trading_engine
+      - name: Run backend tests (trading engine + API security)
+        run: poetry run pytest tests

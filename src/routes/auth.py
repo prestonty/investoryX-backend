@@ -5,11 +5,11 @@ from datetime import timedelta
 from pydantic import BaseModel, ConfigDict, Field
 from fastapi.responses import JSONResponse
 import os
-from src.core.security import get_user_by_email
 from src.services.email import sendSignUpEmail
 
 
 from src.core.database import get_db
+from src.core.rate_limit import RateLimit
 from src.core.security import (
     authenticate_user,
     create_access_token,
@@ -25,6 +25,12 @@ from src.core.security import (
 from src.models.users import Users
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
+
+# Per-IP limits against brute-force logins, signup spam and email-quota abuse.
+LOGIN_LIMIT = RateLimit("login", limit=10, window_seconds=60)
+REGISTER_LIMIT = RateLimit("register", limit=5, window_seconds=3600)
+VERIFY_EMAIL_LIMIT = RateLimit("verify_email", limit=20, window_seconds=60)
+REFRESH_LIMIT = RateLimit("refresh", limit=30, window_seconds=60)
 DISABLE_EMAIL_VERIFICATION = os.getenv("DISABLE_EMAIL_VERIFICATION", "false").lower() in ("1", "true", "yes")
 SECURE_COOKIES = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
@@ -47,25 +53,17 @@ class UserResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class TestEmailRequest(BaseModel):
-    email: str
-    name: str
-    verification_url: str | None = None
 
-
-
-@router.post("/token", response_model=Token)
+@router.post("/token", response_model=Token, dependencies=[Depends(LOGIN_LIMIT)])
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
     request: Request = None
 ):
     """Login endpoint that returns a JWT token and sets cookies."""
-    # Check if user exists first
-    existing_user = get_user_by_email(db, form_data.username)
-
-    # Authenticate — use a single generic error to prevent user enumeration
-    user = authenticate_user(db, form_data.username, form_data.password) if existing_user else None
+    # Authenticate — a single generic error and constant-time password check
+    # (also for unknown emails) prevent user enumeration
+    user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -120,7 +118,7 @@ async def login_for_access_token(
 
     return json_response
 
-@router.post("/register", response_model=UserResponse)
+@router.post("/register", response_model=UserResponse, dependencies=[Depends(REGISTER_LIMIT)])
 async def register_user(user: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
     try:
@@ -175,7 +173,7 @@ async def read_users_me(current_user: Users = Depends(get_current_active_user)):
     """Get current user information."""
     return current_user
 
-@router.get("/verify-email")
+@router.get("/verify-email", dependencies=[Depends(VERIFY_EMAIL_LIMIT)])
 async def verify_email(token: str, db: Session = Depends(get_db)):
     """Endpoint to verify a user's email using a token."""
     user_id = verify_email_token(token)
@@ -195,7 +193,7 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
 
     return {"message": "Email verified successfully"}
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(REFRESH_LIMIT)])
 def refresh_token_endpoint(request: Request, db: Session = Depends(get_db)):
     """Endpoint to refresh access token using a refresh token from cookies."""
     result = refresh_access_token(request, db)
@@ -233,16 +231,3 @@ async def logout():
     )
 
     return response
-
-@router.post("/test-email")
-async def test_email(payload: TestEmailRequest):
-    """Send a test verification email to validate Resend setup."""
-    verification_url = payload.verification_url or "http://localhost:3000/verify-email?token=test"
-    try:
-        sendSignUpEmail(payload.email, payload.name, verification_url)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Email send failed: {exc}",
-        )
-    return {"message": "Test email sent"}

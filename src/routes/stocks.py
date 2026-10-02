@@ -7,6 +7,7 @@ from sqlalchemy import case, or_
 import logging
 
 from src.core.database import get_db
+from src.core.rate_limit import RateLimit
 from src.core.security import get_current_active_user
 from src.services.stock_data import getQuotes
 from src.models.stocks import Stocks
@@ -15,12 +16,15 @@ from src.models.users import Users
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/stocks", tags=["stocks"])
+router = APIRouter(
+    prefix="/api/stocks",
+    tags=["stocks"],
+    dependencies=[Depends(RateLimit("stocks", limit=120, window_seconds=60))],
+)
 
 
-class StockCreate(BaseModel):
-    company_name: str
-    ticker: str
+# The stock catalog is seeded by src/services/seed.py; there is deliberately no
+# public endpoint to add stocks.
 
 
 class StockResponse(BaseModel):
@@ -53,7 +57,8 @@ class WatchlistQuoteItem(BaseModel):
     error: Optional[str] = None
 
 
-@router.get("/", response_model=List[StockResponse])
+# Returns the whole catalog (~13k rows), so it gets a much tighter limit.
+@router.get("/", response_model=List[StockResponse], dependencies=[Depends(RateLimit("stock_list", limit=5, window_seconds=60))])
 def get_stocks(db: Session = Depends(get_db)):
     stocks = db.query(Stocks).all()
     return stocks
@@ -65,15 +70,6 @@ def get_stock(stock_id: int, db: Session = Depends(get_db)):
     if not stock:
         raise HTTPException(status_code=404, detail="Stock not found")
     return stock
-
-
-@router.post("/", response_model=StockResponse)
-def create_stock(stock: StockCreate, db: Session = Depends(get_db)):
-    db_stock = Stocks(**stock.dict())
-    db.add(db_stock)
-    db.commit()
-    db.refresh(db_stock)
-    return db_stock
 
 
 @router.get("/ticker/{ticker}", response_model=StockResponse)
@@ -93,10 +89,10 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
         stock = db.query(Stocks).filter(Stocks.ticker.ilike(f"%{safe_ticker}%")).first()  # case insensitive comparison
     except Exception as exc:
         logger.exception("DB error looking up ticker %s: %s", ticker, exc)
-        raise HTTPException(status_code=500, detail=f"Database error while looking up ticker '{ticker}': {exc}")
+        raise HTTPException(status_code=500, detail="Failed to look up ticker")
     if not stock:
         logger.warning("Ticker '%s' not found in database", ticker)
-        raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found in the database. Make sure it has been seeded.")
+        raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found")
     logger.info("Found ticker %s -> stock_id=%s", ticker, stock.stock_id)
     return stock
 
@@ -128,7 +124,7 @@ def get_watchlist_quotes(
         )
     except Exception as exc:
         logger.exception("DB error fetching watchlist for user_id=%s: %s", current_user.user_id, exc)
-        raise HTTPException(status_code=500, detail=f"Database error fetching watchlist: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to load watchlist")
 
     if not rows:
         return []
@@ -139,7 +135,7 @@ def get_watchlist_quotes(
         price_map = getQuotes(tickers)
     except Exception as exc:
         logger.exception("getQuotes failed for tickers %s: %s", tickers, exc)
-        raise HTTPException(status_code=502, detail=f"Failed to fetch live quotes for {tickers}: {exc}")
+        raise HTTPException(status_code=502, detail="Live quotes are temporarily unavailable")
 
     results: List[WatchlistQuoteItem] = []
     for watch_item, stock in rows:

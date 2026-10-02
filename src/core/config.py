@@ -26,6 +26,10 @@ class Settings:
     sim_slippage_bps: Decimal = Decimal(os.getenv("SIM_SLIPPAGE_BPS", "0"))
 
     debug_errors: bool = os.getenv("DEBUG_ERRORS", "false").lower() in ("1", "true", "yes")
+    rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in ("1", "true", "yes")
+    # Only enable behind a proxy that sets X-Forwarded-For (e.g. Railway); otherwise
+    # clients could spoof the header to dodge rate limits.
+    trust_proxy_headers: bool = os.getenv("TRUST_PROXY_HEADERS", "false").lower() in ("1", "true", "yes")
     disable_email_verification: bool = os.getenv("DISABLE_EMAIL_VERIFICATION", "false").lower() in ("1", "true", "yes")
     dev_mode: bool = os.getenv("DEV_MODE", "false").lower() in ("1", "true", "yes")
 

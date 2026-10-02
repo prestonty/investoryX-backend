@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
@@ -7,6 +9,7 @@ from decimal import Decimal
 from datetime import date, datetime, timedelta, timezone
 
 from src.core.database import get_db
+from src.core.rate_limit import RateLimit
 from src.core.security import get_current_active_user
 from src.models.users import Users
 from src.models.simulator import SIMULATOR_STATUS_PAUSED, Simulator
@@ -43,6 +46,11 @@ from src.trading_engine.tasks.daily_pipeline import MissingPriceDataError, run_p
 
 
 router = APIRouter(prefix="/api/simulator", tags=["simulator"])
+logger = logging.getLogger("investoryx.simulator")
+
+# Each run fetches prices from Yahoo; each backtest queues heavy worker jobs.
+RUN_LIMIT = RateLimit("simulator_run", limit=10, window_seconds=60)
+BACKTEST_LIMIT = RateLimit("simulator_backtest", limit=5, window_seconds=60)
 
 
 def get_user_simulator(
@@ -257,7 +265,7 @@ def get_simulator_summary(
     )
 
 
-@router.post("/{simulator_id}/run", response_model=SimulatorRunResponse)
+@router.post("/{simulator_id}/run", response_model=SimulatorRunResponse, dependencies=[Depends(RUN_LIMIT)])
 def run_simulator(
     simulator_id: int,
     payload: SimulatorRunRequest,
@@ -326,7 +334,12 @@ def run_simulator(
     elif eval_status == STATUS_SKIPPED_PRICE_DATA_MISSING:
         message = f"No price data for {result['day']}"
     elif eval_status == STATUS_ERROR:
-        message = f"Strategy evaluation failed: {sim_results[0].get('error')}"
+        logger.warning(
+            "Strategy evaluation failed for simulator_id=%s: %s",
+            simulator_id,
+            sim_results[0].get("error"),
+        )
+        message = "Strategy evaluation failed"
     else:
         message = "Simulator run completed"
 
@@ -413,7 +426,12 @@ def delete_tracked_stock(
     return {"message": "Tracked stock removed"}
 
 
-@router.post("/{simulator_id}/backtest", response_model=BacktestLaunchResponse, status_code=202)
+@router.post(
+    "/{simulator_id}/backtest",
+    response_model=BacktestLaunchResponse,
+    status_code=202,
+    dependencies=[Depends(BACKTEST_LIMIT)],
+)
 def launch_backtest(
     simulator_id: int,
     payload: BacktestRequest,
@@ -470,7 +488,8 @@ def launch_backtest(
             payload.clear_previous,
         )
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Backtest service unavailable: {exc}")
+        logger.exception("Failed to queue backtest for simulator_id=%s", simulator_id)
+        raise HTTPException(status_code=503, detail="Backtest service unavailable")
 
     return BacktestLaunchResponse(task_id=task.id, message="Backtest queued")
 
@@ -499,14 +518,17 @@ def get_backtest_status(
         return BacktestStatusResponse(task_id=task_id, status="running")
     if state == "SUCCESS":
         raw = async_result.result or {}
+        # The caller owns simulator_id, but the task_id must also belong to it.
+        if raw.get("simulator_id") != simulator_id:
+            raise HTTPException(status_code=404, detail="Backtest not found")
         try:
             result = BacktestResultSchema(**raw)
         except Exception:
             result = None
         return BacktestStatusResponse(task_id=task_id, status="success", result=result)
-    # FAILURE or REVOKED
-    error_msg = str(async_result.result) if async_result.result else "Backtest failed"
-    return BacktestStatusResponse(task_id=task_id, status="failure", error=error_msg)
+    # FAILURE or REVOKED: the worker logs the traceback; don't echo internals to the client.
+    logger.warning("Backtest task %s ended in state %s: %s", task_id, state, async_result.result)
+    return BacktestStatusResponse(task_id=task_id, status="failure", error="Backtest failed")
 
 
 @router.delete(
