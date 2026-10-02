@@ -91,7 +91,7 @@ def test_execute_signals_rolls_back_on_error(monkeypatch: pytest.MonkeyPatch) ->
 TRADE_DAY = date(2024, 3, 8)
 
 
-def _pending_buy(simulator_id: int = 1) -> SimulatorSignal:
+def _pending_buy(simulator_id: int = 1, for_day: date | None = TRADE_DAY) -> SimulatorSignal:
     return SimulatorSignal(
         simulator_id=simulator_id,
         ticker="AAPL",
@@ -101,6 +101,7 @@ def _pending_buy(simulator_id: int = 1) -> SimulatorSignal:
         confidence=Decimal("1"),
         strategy_name="sma_crossover",
         status="pending",
+        for_day=for_day,
     )
 
 
@@ -132,3 +133,18 @@ def test_executed_trade_writes_ledger_row(db) -> None:
     assert ledger.delta == Decimal("-201")
     assert ledger.balance_after == Decimal("799")
     assert (ledger.reason, ledger.source) == ("buy", "live")
+
+
+@pytest.mark.parametrize("for_day", [TRADE_DAY - timedelta(days=1), None])
+def test_stale_or_undated_signal_expires_instead_of_filling(db, for_day) -> None:
+    db.simulator(1, cash="1000")
+    db.bars("AAPL", [TRADE_DAY - timedelta(days=1), TRADE_DAY], close="100")
+    db.add(_pending_buy(for_day=for_day))  # e.g. left pending by a failed run
+
+    summary = execute_module.execute_signals(day=TRADE_DAY)
+
+    assert (summary.skipped, summary.executed) == (1, 0)
+    [signal] = db.all(SimulatorSignal)
+    assert signal.status == "skipped"
+    assert signal.execution_error.startswith("expired")
+    assert db.all(SimulatorTrade) == []

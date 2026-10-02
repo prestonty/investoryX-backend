@@ -52,6 +52,46 @@ def test_second_evaluation_for_same_day_is_skipped(db) -> None:
     assert len(db.all(SimulatorSignal)) == signals_after_first
 
 
+def test_signals_record_the_day_they_were_evaluated_for(db) -> None:
+    db.simulator(1)
+    db.bars("AAPL", _days_back(5))
+
+    EvaluationService().run(as_of_day=AS_OF)
+
+    assert {s.for_day for s in db.all(SimulatorSignal)} == {AS_OF}
+
+
+def test_concurrent_run_is_stopped_by_unique_constraint(db, monkeypatch) -> None:
+    db.simulator(1)
+    db.bars("AAPL", _days_back(5))
+    EvaluationService().run(as_of_day=AS_OF)
+    count = len(db.all(SimulatorSignal))
+
+    # Simulate a second run that passed the pre-check before the first one committed.
+    racing = EvaluationService()
+    monkeypatch.setattr(racing, "has_signals_for_day", lambda *_: False)
+    summary = racing.run(as_of_day=AS_OF)
+
+    assert summary.simulator_results[0]["status"] == STATUS_SKIPPED_ALREADY_EVALUATED
+    assert len(db.all(SimulatorSignal)) == count
+
+
+def test_legacy_undated_signal_after_close_still_counts_as_evaluated(db) -> None:
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    db.simulator(1)
+    db.add(SimulatorSignal(
+        simulator_id=1, ticker="AAPL", action="hold", quantity=Decimal("0"), reason="old",
+        confidence=Decimal("0"), strategy_name="sma_crossover", status="skipped",
+        created_at=datetime(2024, 3, 8, 21, 30, tzinfo=timezone.utc),  # 4:30 PM ET on AS_OF
+        for_day=None,
+    ))
+
+    assert EvaluationService().has_signals_for_day(1, AS_OF) is True
+    assert EvaluationService().has_signals_for_day(1, AS_OF + timedelta(days=3)) is False
+
+
 def test_paused_simulators_are_not_evaluated(db) -> None:
     db.simulator(1, tickers=("AAPL",))
     db.simulator(2, tickers=("AAPL",), status=SIMULATOR_STATUS_PAUSED)

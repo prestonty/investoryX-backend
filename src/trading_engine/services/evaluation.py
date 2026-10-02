@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 
 from src.core.database import SessionLocal
 from src.models.price_bar import PriceBar as PriceBarModel
@@ -33,6 +34,10 @@ STATUS_OK = "ok"
 STATUS_ERROR = "error"
 STATUS_SKIPPED_PRICE_DATA_MISSING = "skipped_price_data_missing"
 STATUS_SKIPPED_ALREADY_EVALUATED = "skipped_already_evaluated"
+
+
+class AlreadyEvaluatedError(Exception):
+    """Signals for this simulator and trading day were already saved by another run."""
 
 
 @dataclass
@@ -164,7 +169,11 @@ class EvaluationService:
                 portfolio_snapshot=snapshot,
                 params=params,
             )
-            saved_signals = self.persist_signals(simulator_id, signals)
+            try:
+                saved_signals = self.persist_signals(simulator_id, signals, as_of_day)
+            except AlreadyEvaluatedError:
+                # A concurrent run evaluated this day between the pre-check and the insert.
+                return self._build_skipped_result(simulator_id, STATUS_SKIPPED_ALREADY_EVALUATED)
             return self._build_ok_result(simulator_id, len(saved_signals))
         except Exception as exc:
             return self._build_error_result(simulator_id, str(exc))
@@ -227,18 +236,29 @@ class EvaluationService:
     def has_signals_for_day(self, simulator_id: int, as_of_day: date) -> bool:
         """True if this simulator was already evaluated on as_of_day's prices.
 
-        Evaluation for a day can only run after that day's close, so any signal
-        created at or after the close means the day has been evaluated. This
-        keeps the scheduled pipeline, manual runs and dev runs from creating
-        duplicate signals (and duplicate trades) for the same prices.
+        Keeps the scheduled pipeline, manual runs and dev runs from creating
+        duplicate signals (and duplicate trades) for the same prices. This is a
+        fast pre-check; the unique constraint on (simulator_id, for_day, ticker)
+        is what actually prevents duplicates when runs race (see persist_signals).
         """
+        # Signals saved before for_day existed have it NULL. Evaluation for a day
+        # only runs after that day's close, so for those, any signal created at or
+        # after the close means the day was evaluated.
         day_close = datetime.combine(as_of_day, MARKET_CLOSE, tzinfo=MARKET_TZ)
         session = SessionLocal()
         try:
             stmt = (
                 select(SimulatorSignal.signal_id)
                 .where(SimulatorSignal.simulator_id == simulator_id)
-                .where(SimulatorSignal.created_at >= day_close.astimezone(timezone.utc))
+                .where(
+                    or_(
+                        SimulatorSignal.for_day == as_of_day,
+                        and_(
+                            SimulatorSignal.for_day.is_(None),
+                            SimulatorSignal.created_at >= day_close.astimezone(timezone.utc),
+                        ),
+                    )
+                )
                 .limit(1)
             )
             return session.execute(stmt).first() is not None
@@ -412,16 +432,23 @@ class EvaluationService:
         self,
         simulator_id: int,
         signals: list[Signal],
+        for_day: date,
     ) -> list[SimulatorSignal]:
+        """Save signals for for_day; raises AlreadyEvaluatedError if another run did first."""
         if not signals:
             return []
+
+        # At most one signal per ticker per day (the unique constraint's shape).
+        by_ticker: dict[str, Signal] = {}
+        for signal in signals:
+            by_ticker.setdefault(signal.symbol.strip().upper(), signal)
 
         session = SessionLocal()
         try:
             rows = [
                 SimulatorSignal(
                     simulator_id=simulator_id,
-                    ticker=signal.symbol.strip().upper(),
+                    ticker=ticker,
                     action=signal.action.value,
                     quantity=signal.quantity,
                     reason=signal.reason,
@@ -429,14 +456,20 @@ class EvaluationService:
                     strategy_name=signal.strategy_name,
                     status=SignalExecutionStatus.PENDING.value,
                     created_at=signal.created_at,
+                    for_day=for_day,
                 )
-                for signal in signals
+                for ticker, signal in by_ticker.items()
             ]
             session.add_all(rows)
             session.commit()
             for row in rows:
                 session.refresh(row)
             return rows
+        except IntegrityError as exc:
+            session.rollback()
+            raise AlreadyEvaluatedError(
+                f"simulator_id={simulator_id} already has signals for {for_day.isoformat()}"
+            ) from exc
         except Exception:
             session.rollback()
             raise

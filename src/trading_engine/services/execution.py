@@ -263,6 +263,18 @@ class PaperTradeExecutionService:
             self._mark_skipped(signal, "hold signal is not executable", context.now)
             return SignalOutcome.SKIPPED, None
 
+        # A signal decided on one day's prices must not fill at a later day's
+        # price (e.g. after a failed execution run). Undated legacy signals expire too.
+        if signal.for_day != context.trade_day:
+            evaluated_for = signal.for_day.isoformat() if signal.for_day else "an unknown day"
+            self._mark_skipped(
+                signal,
+                f"expired: evaluated for {evaluated_for}, not executed until "
+                f"{context.trade_day.isoformat()}",
+                context.now,
+            )
+            return SignalOutcome.SKIPPED, None
+
         symbol = signal.ticker.strip().upper()
         price = self._get_close_for_day(context.session, symbol, context.trade_day)
         if price is None:
