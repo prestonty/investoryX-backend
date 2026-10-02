@@ -61,7 +61,7 @@ def get_stock_overview(ticker: str):
 
 
 @router.get("/stock-news")
-def get_stock_news(max_articles: int = Query(default=20, description="Max number of articles")):
+def get_stock_news(max_articles: int = Query(default=20, ge=1, description="Max number of articles")):
     try:
         return getStockNews(max_articles)
     except RuntimeError as e:

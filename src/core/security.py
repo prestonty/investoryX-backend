@@ -1,7 +1,7 @@
 import os
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
 from src.core.database import get_db
+from src.models.user_session import UserSession
 from src.models.users import Users
 
 # Load environment variables
@@ -24,12 +25,14 @@ if SECRET_KEY is None:
 
 REFRESH_SECRET_KEY = os.getenv("REFRESH_SECRET_KEY", SECRET_KEY)  # Fallback to SECRET_KEY if not set
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+# Short-lived: the frontend refreshes transparently, and a stolen access token
+# is only useful briefly (logout revokes it immediately anyway).
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 EMAIL_TOKEN_EXPIRE_MINUTES = int(os.getenv("EMAIL_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours by default
 
 # OAuth2 scheme for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token", auto_error=False)
 
 # Every token carries a "type" claim so one kind can't be used as another
 # (e.g. an emailed verification link or a refresh cookie as an API bearer token).
@@ -101,31 +104,6 @@ def decode_refresh_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
     return payload
 
-def refresh_access_token(request: Request, db: Session):
-    """Validate refresh token and return a new access token."""
-    refresh_token = request.cookies.get("refresh_token")
-    if not refresh_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
-
-    payload = decode_refresh_token(refresh_token)
-    user_id: str = payload.get("sub")
-    if user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token payload")
-
-    # Verify user exists and is active
-    user = db.query(Users).filter(Users.user_id == int(user_id)).first()
-    if not user or not user.is_active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or inactive")
-
-    # Create a new access token
-    new_access_token = create_access_token(
-        data={"sub": str(user.user_id)},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-
-    return {"access_token": new_access_token, "token_type": "bearer"}
-
-
 def create_email_verification_token(user_id: int, expires_minutes: Optional[int] = None) -> str:
     """Create a JWT token specifically for email verification."""
     minutes = expires_minutes if expires_minutes is not None else EMAIL_TOKEN_EXPIRE_MINUTES
@@ -156,24 +134,47 @@ def verify_email_token(token: str) -> Optional[int]:
     except (TypeError, ValueError):
         return None
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Users:
-    """Get the current authenticated user from token."""
+async def get_current_user(
+    request: Request,
+    bearer_token: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Users:
+    """Get the current user from the access token.
+
+    Browsers send it as the httpOnly `access_token` cookie; API clients (and
+    the OpenAPI docs) may send it as a Bearer header instead.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    token = bearer_token or request.cookies.get("access_token")
+    if not token:
+        raise credentials_exception
     payload = verify_token(token)
     if payload is None:
         raise credentials_exception
-    # Only access tokens authenticate API calls. Older untyped access tokens are
-    # rejected too; the frontend then refreshes and receives a typed one.
+    # Only access tokens authenticate API calls. Older tokens without a type or
+    # session are rejected too; the frontend then refreshes and gets new ones.
     if payload.get("type") != TOKEN_TYPE_ACCESS:
         raise credentials_exception
 
-    user_id: int = payload.get("sub")
-    if user_id is None:
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        raise credentials_exception
+
+    # Logout and refresh-token reuse revoke the session, which must invalidate
+    # its access tokens immediately rather than at expiry.
+    session = db.get(UserSession, payload.get("sid")) if payload.get("sid") else None
+    if (
+        session is None
+        or session.user_id != user_id
+        or session.revoked_at is not None
+        or _as_utc(session.expires_at) <= datetime.now(timezone.utc)
+    ):
         raise credentials_exception
 
     user = get_user_by_id(db, user_id)
@@ -181,6 +182,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         raise credentials_exception
 
     return user
+
+
+def _as_utc(value: datetime) -> datetime:
+    # SQLite (tests) returns naive datetimes; Postgres returns aware ones.
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 async def get_current_active_user(current_user: Users = Depends(get_current_user)) -> Users:
     """Get the current active user."""

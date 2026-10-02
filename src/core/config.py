@@ -24,6 +24,10 @@ class Settings:
     # Paper-trading execution costs, applied the same way by every trading path.
     sim_fee_per_trade: Decimal = Decimal(os.getenv("SIM_FEE_PER_TRADE", "0"))
     sim_slippage_bps: Decimal = Decimal(os.getenv("SIM_SLIPPAGE_BPS", "0"))
+    # Largest notional value of a single paper buy; unset means no cap.
+    sim_max_order_value: Decimal | None = (
+        Decimal(os.environ["SIM_MAX_ORDER_VALUE"]) if os.getenv("SIM_MAX_ORDER_VALUE") else None
+    )
 
     debug_errors: bool = os.getenv("DEBUG_ERRORS", "false").lower() in ("1", "true", "yes")
     rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in ("1", "true", "yes")
@@ -34,6 +38,12 @@ class Settings:
     dev_mode: bool = os.getenv("DEV_MODE", "false").lower() in ("1", "true", "yes")
 
     frontend_base_url: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+
+    # Auth cookies. Production serves the API at api.investoryx.ca, so
+    # COOKIE_DOMAIN=.investoryx.ca shares them with the frontend's server
+    # (www.investoryx.ca). Leave unset locally (host-only cookies on localhost).
+    cookie_domain: str | None = os.getenv("COOKIE_DOMAIN") or None
+    secure_cookies: bool = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
     @property
     def cors_origins(self) -> list[str]:

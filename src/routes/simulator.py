@@ -42,6 +42,13 @@ from src.trading_engine.services.evaluation import (
     STATUS_SKIPPED_ALREADY_EVALUATED,
     STATUS_SKIPPED_PRICE_DATA_MISSING,
 )
+from src.trading_engine.services.actions import SignalAction
+from src.trading_engine.services.execution import SignalExecutionStatus
+from src.trading_engine.strategies.catalog import (
+    DEFAULT_STRATEGY_NAME,
+    InvalidStrategyParams,
+    params_to_store,
+)
 from src.trading_engine.tasks.daily_pipeline import MissingPriceDataError, run_pipeline
 
 
@@ -80,7 +87,6 @@ def create_simulator(
         cash_balance=payload.starting_cash,
         status=payload.status,
         frequency=payload.frequency,
-        price_mode=payload.price_mode,
         max_position_pct=payload.max_position_pct,
         max_daily_loss_pct=payload.max_daily_loss_pct,
         stopped_reason=payload.stopped_reason,
@@ -126,19 +132,39 @@ def update_simulator_settings(
 
     if "frequency" in payload.model_fields_set and payload.frequency is not None:
         simulator.frequency = payload.frequency
-    if "price_mode" in payload.model_fields_set and payload.price_mode is not None:
-        simulator.price_mode = payload.price_mode
     if "max_position_pct" in payload.model_fields_set:
         simulator.max_position_pct = payload.max_position_pct
     if "max_daily_loss_pct" in payload.model_fields_set:
         simulator.max_daily_loss_pct = payload.max_daily_loss_pct
-    if "strategy_name" in payload.model_fields_set and payload.strategy_name is not None:
-        simulator.strategy_name = payload.strategy_name
+    _apply_strategy_settings(simulator, payload)
 
     db.add(simulator)
     db.commit()
     db.refresh(simulator)
     return SimulatorResponse.model_validate(simulator)
+
+
+def _apply_strategy_settings(
+    simulator: Simulator,
+    payload: SimulatorSettingsUpdateRequest,
+) -> None:
+    """Set strategy_name/strategy_params; params are always validated for the final strategy."""
+    fields = payload.model_fields_set
+    new_name = payload.strategy_name or simulator.strategy_name or DEFAULT_STRATEGY_NAME
+    if "strategy_params" in fields:
+        params = payload.strategy_params or {}
+    elif new_name != simulator.strategy_name:
+        # Another strategy's params don't apply; start from the new one's defaults.
+        params = {}
+    else:
+        return
+
+    try:
+        stored = params_to_store(new_name, params)
+    except InvalidStrategyParams as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid strategy settings: {exc}")
+    simulator.strategy_name = new_name
+    simulator.strategy_params = stored
 
 
 @router.get("", response_model=List[SimulatorResponse])
@@ -164,11 +190,11 @@ def list_simulators(
             last_run_at=s.last_run_at,
             next_run_at=s.next_run_at,
             frequency=s.frequency,
-            price_mode=s.price_mode,
             max_position_pct=s.max_position_pct,
             max_daily_loss_pct=s.max_daily_loss_pct,
             stopped_reason=s.stopped_reason,
-            strategy_name=s.strategy_name or "sma_crossover",
+            strategy_name=s.strategy_name or DEFAULT_STRATEGY_NAME,
+            strategy_params=s.strategy_params,
             created_at=s.created_at,
             updated_at=s.updated_at,
             tickers=[ts.ticker for ts in s.tracked_stocks],
@@ -276,9 +302,7 @@ def run_simulator(
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
 
-    price_mode = payload.price_mode or simulator.price_mode
     frequency = payload.frequency or simulator.frequency
-    simulator.price_mode = price_mode
     simulator.frequency = frequency
 
     tracked_stocks = (
@@ -299,7 +323,6 @@ def run_simulator(
             message="No tracked stocks to evaluate",
             trades_executed=0,
             cash_balance=Decimal(str(simulator.cash_balance)),
-            price_mode=price_mode,
             frequency=frequency,
         )
 
@@ -310,17 +333,16 @@ def run_simulator(
             message="Simulator is paused",
             trades_executed=0,
             cash_balance=Decimal(str(simulator.cash_balance)),
-            price_mode=price_mode,
             frequency=frequency,
         )
 
     # Persist setting changes before the engine runs in its own sessions.
     db.commit()
 
-    # Same fetch -> evaluate -> execute -> reconcile path as the scheduled pipeline,
+    # Same fetch -> execute -> reconcile -> evaluate path as the scheduled pipeline,
     # scoped to this simulator, so every run follows the simulator's strategy.
-    # Live fills always use the close: filling at the open after seeing the
-    # close would be lookahead bias. price_mode="open" only applies to backtests.
+    # It fills the previous trading day's orders at today's open and queues new
+    # orders from today's close for the next open.
     try:
         result = run_pipeline(simulator_id=simulator_id)
     except MissingPriceDataError as exc:
@@ -357,9 +379,22 @@ def run_simulator(
     return SimulatorRunResponse(
         message=message,
         trades_executed=trades_executed,
+        orders_queued=_count_queued_orders(db, simulator_id),
         cash_balance=Decimal(str(simulator.cash_balance)),
-        price_mode=price_mode,
         frequency=frequency,
+    )
+
+
+def _count_queued_orders(db: Session, simulator_id: int) -> int:
+    """Buy/sell signals still waiting for the next open."""
+    return (
+        db.query(SimulatorSignal)
+        .filter(
+            SimulatorSignal.simulator_id == simulator_id,
+            SimulatorSignal.status == SignalExecutionStatus.PENDING.value,
+            SimulatorSignal.action != SignalAction.HOLD.value,
+        )
+        .count()
     )
 
 
@@ -477,15 +512,12 @@ def launch_backtest(
     if enabled_stocks == 0:
         raise HTTPException(status_code=400, detail="No enabled tracked stocks — add stocks before running a backtest")
 
-    price_mode = payload.price_mode or simulator.price_mode or "close"
-
     try:
         task = run_backtest_task.delay(
             simulator_id,
             payload.start_date.isoformat(),
             payload.end_date.isoformat(),
-            price_mode,
-            payload.clear_previous,
+            clear_previous=payload.clear_previous,
         )
     except Exception as exc:
         logger.exception("Failed to queue backtest for simulator_id=%s", simulator_id)
@@ -502,14 +534,15 @@ def get_backtest_status(
     current_user: Users = Depends(get_current_active_user),
 ):
     """Poll the status of a running or completed backtest task."""
-    from celery.result import AsyncResult
+    # Use the configured app so results are read from the same backend the worker writes to.
+    from src.celery_app import app as celery_app
 
     # Verify the simulator belongs to the current user
     simulator = get_user_simulator(db, simulator_id, current_user.user_id)
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
 
-    async_result = AsyncResult(task_id)
+    async_result = celery_app.AsyncResult(task_id)
     state = async_result.state
 
     if state in ("PENDING", "RECEIVED"):

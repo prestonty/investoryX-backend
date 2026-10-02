@@ -1,13 +1,13 @@
 from .actions import SignalAction
 from .execution import (
     ExecutionRules,
-    ExecutionService,
     ExecutionSummary,
+    Fill,
+    FillRejected,
     PaperTradeExecutionService,
     SignalExecutionStatus,
     SignalOutcome,
-    Trade,
-    TradeIntent,
+    plan_fill,
 )
 from .evaluation import (
     EvaluationRunStats,
@@ -32,14 +32,14 @@ from .strategy import Signal, Strategy, StrategyRegistry, StrategyService
 
 __all__ = [
     "ExecutionRules",
-    "ExecutionService",
     "ExecutionSummary",
+    "Fill",
+    "FillRejected",
     "SignalAction",
     "PaperTradeExecutionService",
     "SignalExecutionStatus",
     "SignalOutcome",
-    "Trade",
-    "TradeIntent",
+    "plan_fill",
     "EvaluationRunStats",
     "EvaluationService",
     "EvaluationSummary",

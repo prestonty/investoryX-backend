@@ -23,6 +23,11 @@ router = APIRouter(
 )
 
 
+def normalize_ticker(ticker: str) -> str:
+    """Catalog tickers are uppercase in Yahoo's format (BRK-B), so lookups are exact matches."""
+    return ticker.strip().upper().replace(".", "-")
+
+
 # The stock catalog is seeded by src/services/seed.py; there is deliberately no
 # public endpoint to add stocks.
 
@@ -85,8 +90,7 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
     """
     logger.info("GET /api/stocks/ticker/%s", ticker)
     try:
-        safe_ticker = ticker.replace("%", r"\%").replace("_", r"\_")
-        stock = db.query(Stocks).filter(Stocks.ticker.ilike(f"%{safe_ticker}%")).first()  # case insensitive comparison
+        stock = db.query(Stocks).filter(Stocks.ticker == normalize_ticker(ticker)).first()
     except Exception as exc:
         logger.exception("DB error looking up ticker %s: %s", ticker, exc)
         raise HTTPException(status_code=500, detail="Failed to look up ticker")
@@ -101,7 +105,7 @@ def get_stock_by_ticker(ticker: str, db: Session = Depends(get_db)):
 def stock_exists(ticker: str, db: Session = Depends(get_db)):
     exists = (
         db.query(Stocks.stock_id)
-        .filter(Stocks.ticker.ilike(ticker))
+        .filter(Stocks.ticker == normalize_ticker(ticker))
         .first()
         is not None
     )
@@ -186,7 +190,7 @@ def search_stocks(filter_string: str, db: Session = Depends(get_db)):
     ).order_by(
         # Prioritize ticker matches over company name matches
         case(
-            (Stocks.ticker == safe_filter.lower(), 0),
+            (Stocks.ticker == normalize_ticker(filter_string), 0),
             (Stocks.ticker.ilike(f"{safe_filter}%"), 1),
             (Stocks.company_name.ilike(f"%{safe_filter}%"), 2),
             else_=3

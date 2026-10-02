@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 
 from src.core.config import settings
-from src.routes import stocks, users, watchlist, auth, simulator, market_data, dev
+from src.routes import stocks, users, watchlist, auth, simulator, strategies, market_data, dev
 
 app = FastAPI()
 
@@ -54,6 +54,7 @@ app.include_router(users.router)
 app.include_router(watchlist.router)
 app.include_router(auth.router)
 app.include_router(simulator.router)
+app.include_router(strategies.router)
 app.include_router(market_data.router)
 app.include_router(dev.router)
 

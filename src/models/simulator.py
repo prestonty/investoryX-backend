@@ -1,5 +1,5 @@
 from src.core.database import Base
-from sqlalchemy import Column, ForeignKey, Integer, String, TIMESTAMP, Numeric, text, Index, Enum
+from sqlalchemy import Column, ForeignKey, Integer, JSON, String, TIMESTAMP, Numeric, text, Index, Enum
 from sqlalchemy.orm import relationship
 
 SIMULATOR_STATUS_ACTIVE = "Active Trading"
@@ -28,20 +28,6 @@ simulator_frequency_enum = Enum(
     native_enum=False,
 )
 
-SIMULATOR_PRICE_MODE_OPEN = "open"
-SIMULATOR_PRICE_MODE_CLOSE = "close"
-SIMULATOR_PRICE_MODE_VALUES = (
-    SIMULATOR_PRICE_MODE_OPEN,
-    SIMULATOR_PRICE_MODE_CLOSE,
-)
-
-simulator_price_mode_enum = Enum(
-    *SIMULATOR_PRICE_MODE_VALUES,
-    name="simulator_price_mode",
-    native_enum=False,
-)
-
-
 class Simulator(Base):
     # Simulator represents a single paper-trading bot configuration and its cash state.
     __tablename__ = "simulators"
@@ -64,15 +50,12 @@ class Simulator(Base):
         nullable=False,
         server_default=text(f"'{SIMULATOR_FREQUENCY_DAILY}'"),
     )
-    price_mode = Column(
-        simulator_price_mode_enum,
-        nullable=False,
-        server_default=text(f"'{SIMULATOR_PRICE_MODE_CLOSE}'"),
-    )
     max_position_pct = Column(Numeric(5, 2), nullable=True)
     max_daily_loss_pct = Column(Numeric(5, 2), nullable=True)
     stopped_reason = Column(String, nullable=True)
     strategy_name = Column(String, nullable=False, server_default=text("'sma_crossover'"))
+    # Tunables for strategy_name, only the keys the user set; NULL means all defaults.
+    strategy_params = Column(JSON, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
 

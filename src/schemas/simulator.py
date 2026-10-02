@@ -1,16 +1,20 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional, Literal
+from typing import Any, List, Optional, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from src.trading_engine.strategies.catalog import (
+    CATALOG,
+    DEFAULT_STRATEGY_NAME,
+    InvalidStrategyParams,
+    effective_params,
+)
 
 SIMULATOR_STATUS_ACTIVE = "Active Trading"
 SimulatorStatus = Literal["Active Trading", "Pause Trading"]
 SIMULATOR_FREQUENCY_DAILY = "daily"
-SIMULATOR_PRICE_MODE_CLOSE = "close"
 SimulatorFrequency = Literal["daily", "twice_daily"]
-SimulatorPriceMode = Literal["open", "close"]
-SimulatorStrategyName = Literal["sma_crossover", "stat_arb_pairs", "auction_liquidity_provider"]
 
 
 class SimulatorCreate(BaseModel):
@@ -18,8 +22,7 @@ class SimulatorCreate(BaseModel):
     starting_cash: Decimal
     status: SimulatorStatus = SIMULATOR_STATUS_ACTIVE
     frequency: SimulatorFrequency = SIMULATOR_FREQUENCY_DAILY
-    price_mode: SimulatorPriceMode = SIMULATOR_PRICE_MODE_CLOSE
-    max_position_pct: Optional[Decimal] = None
+    max_position_pct: Optional[Decimal] = Field(None, gt=0, le=100)
     max_daily_loss_pct: Optional[Decimal] = None
     stopped_reason: Optional[str] = None
 
@@ -34,17 +37,27 @@ class SimulatorResponse(BaseModel):
     last_run_at: Optional[datetime]
     next_run_at: Optional[datetime]
     frequency: SimulatorFrequency
-    price_mode: SimulatorPriceMode
     max_position_pct: Optional[Decimal]
     max_daily_loss_pct: Optional[Decimal]
     stopped_reason: Optional[str]
-    strategy_name: str = "sma_crossover"
+    strategy_name: str = DEFAULT_STRATEGY_NAME
+    # Every param of strategy_name, with defaults filled in for unset ones.
+    strategy_params: Optional[dict[str, Any]] = None
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     tickers: List[str] = []
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode="after")
+    def _fill_param_defaults(self) -> "SimulatorResponse":
+        try:
+            self.strategy_params = effective_params(self.strategy_name, self.strategy_params)
+        except InvalidStrategyParams:
+            # Saved params no longer fit (e.g. after a strategy change); show them as stored.
+            self.strategy_params = self.strategy_params or {}
+        return self
 
 
 class SimulatorRenameRequest(BaseModel):
@@ -53,10 +66,18 @@ class SimulatorRenameRequest(BaseModel):
 
 class SimulatorSettingsUpdateRequest(BaseModel):
     frequency: Optional[SimulatorFrequency] = None
-    price_mode: Optional[SimulatorPriceMode] = None
-    max_position_pct: Optional[Decimal] = None
+    max_position_pct: Optional[Decimal] = Field(None, gt=0, le=100)
     max_daily_loss_pct: Optional[Decimal] = None
-    strategy_name: Optional[SimulatorStrategyName] = None
+    strategy_name: Optional[str] = None
+    # Replaces the saved params; omitted keys use the strategy's defaults.
+    strategy_params: Optional[dict[str, Any]] = None
+
+    @field_validator("strategy_name")
+    @classmethod
+    def _known_strategy(cls, value: str | None) -> str | None:
+        if value is not None and value not in CATALOG:
+            raise ValueError(f"must be one of: {', '.join(CATALOG)}")
+        return value
 
 
 class SimulatorTrackedStockCreate(BaseModel):
@@ -129,14 +150,15 @@ class MessageResponse(BaseModel):
 
 class SimulatorRunResponse(BaseModel):
     message: str
+    # Fills of the previous trading day's orders, at today's open.
     trades_executed: int
+    # Buy/sell orders decided on today's close, waiting for the next open.
+    orders_queued: int = 0
     cash_balance: Decimal
-    price_mode: SimulatorPriceMode
     frequency: SimulatorFrequency
 
 
 class SimulatorRunRequest(BaseModel):
-    price_mode: Optional[SimulatorPriceMode] = None
     frequency: Optional[SimulatorFrequency] = None
 
 
@@ -147,7 +169,6 @@ class SimulatorRunRequest(BaseModel):
 class BacktestRequest(BaseModel):
     start_date: date
     end_date: date
-    price_mode: Optional[SimulatorPriceMode] = None
     clear_previous: bool = True
 
 
@@ -187,3 +208,24 @@ class BacktestStatusResponse(BaseModel):
     status: Literal["pending", "running", "success", "failure"]
     result: Optional[BacktestResult] = None
     error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Strategy catalog schemas
+# ---------------------------------------------------------------------------
+
+class StrategyParamSpec(BaseModel):
+    name: str
+    label: str
+    type: Literal["integer", "number", "ticker"]
+    default: Optional[float | int | str] = None
+    min: Optional[float] = None
+    max: Optional[float] = None
+    min_exclusive: bool = False
+    max_exclusive: bool = False
+
+
+class StrategyOptionResponse(BaseModel):
+    value: str
+    label: str
+    params: List[StrategyParamSpec]

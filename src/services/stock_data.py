@@ -6,7 +6,13 @@ import time
 import httpx
 import yfinance as yf
 from selectolax.parser import HTMLParser
-from src.core.redis_client import get_redis, mark_unavailable
+from src.services.cache import (
+    cache_get,
+    cache_get_many,
+    cache_set,
+    cached,
+    market_is_open,
+)
 from src.data_types.history import Period, Interval
 from src.utils import RateLimiter, dataframeToJson, round_2_decimals, with_backoff, format_number
 
@@ -16,31 +22,24 @@ logger = logging.getLogger("investoryx.stock_data")
 per_batch_limiter = RateLimiter(20, 60.0)
 per_ticker_limiter = RateLimiter(60, 60.0)
 
-# Redis cache — reuses the same Redis instance as Celery
-# Keys are namespaced with "cache:" to avoid collisions with Celery keys
-SCREENER_CACHE_TTL = 300  # 5 minutes
+# Cache TTLs in seconds: (market open, market closed). Prices change constantly
+# while the market is open; outside the session they don't change at all, but
+# closed-market TTLs are capped so post-close corrections still show up.
+PRICE_TTL = (30, 30 * 60)
+SCREENER_TTL = (2 * 60, 30 * 60)
+OVERVIEW_TTL = (60 * 60, 6 * 60 * 60)
+NEWS_TTL = (10 * 60, 10 * 60)
+NEWS_FETCH_LIMIT = 100
+_INTRADAY_MINUTES = {"1m": 1, "2m": 2, "5m": 5, "15m": 15, "30m": 30, "60m": 60, "90m": 90, "1h": 60}
 
 
-def _cache_get(key: str):
-    client = get_redis()
-    if client is None:
-        return None
-    try:
-        raw = client.get(f"cache:{key}")
-        return json.loads(raw) if raw else None
-    except Exception as e:
-        mark_unavailable(e)
-        return None
+def _history_ttl_open(ticker, period, interval) -> int:
+    minutes = _INTRADAY_MINUTES.get(str(interval))
+    return max(60, minutes * 60) if minutes else 10 * 60  # a new bar per interval; daily bars change slowly
 
 
-def _cache_set(key: str, value, ttl: int = SCREENER_CACHE_TTL):
-    client = get_redis()
-    if client is None:
-        return
-    try:
-        client.setex(f"cache:{key}", ttl, json.dumps(value))
-    except Exception as e:
-        mark_unavailable(e)
+def _history_ttl_closed(ticker, period, interval) -> int:
+    return 30 * 60 if str(interval) in _INTRADAY_MINUTES else 6 * 60 * 60
 
 
 def getStockPriceYFinance(ticker: str, etf: bool = False):
@@ -121,6 +120,7 @@ def getStockPriceWebScraping(ticker: str, etf: bool = False):
         raise RuntimeError(f"Unexpected error: {str(e)}")
 
 
+@cached("price", *PRICE_TTL, key=lambda ticker, etf=False: f"{ticker.upper()}:{etf}")
 def getStockPrice(ticker: str, etf: bool = False):
     """
     Get stock price data with fallback mechanism
@@ -140,7 +140,34 @@ def getStockPrice(ticker: str, etf: bool = False):
 
 def getQuotes(tickers):
     """
-    Fetches stock quotes - a snapshot of a stock's current market status for multiple tickers using yfinance.
+    Quotes (price, change, % change) for several tickers.
+
+    Each ticker is cached separately, so a ticker fetched for one page (e.g. SPY
+    on the homepage) also serves every watchlist containing it; only the misses
+    go to Yahoo. If a fetch fails, the last good quote is served when available.
+    """
+    tickers = list(dict.fromkeys(tickers))
+    fresh = cache_get_many([f"cache:quote:{t}" for t in tickers])
+    results = {t: quote for t, quote in zip(tickers, fresh) if quote is not None}
+    misses = [t for t in tickers if t not in results]
+    if not misses:
+        return results
+
+    fetched = _fetchQuotes(misses)
+    ttl = PRICE_TTL[0] if market_is_open() else PRICE_TTL[1]
+    for t, quote in fetched.items():
+        if "error" not in quote:
+            cache_set(f"quote:{t}", quote, ttl)
+            results[t] = quote
+        else:
+            stale = cache_get(f"stale:quote:{t}")
+            results[t] = stale if stale is not None else quote
+    return results
+
+
+def _fetchQuotes(tickers):
+    """
+    Fetches stock quotes from yfinance, uncached.
     Respects Yahoo Finance's limit of ~30 tickers per batch.
     Add throttling to avoid rate limits
     """
@@ -179,8 +206,13 @@ def getQuotes(tickers):
 
     return results
 
-    # I should call this every morning to fetch the stocks and store them in a database so it can be used throughout the day!!!
 
+@cached(
+    "history",
+    _history_ttl_open,
+    _history_ttl_closed,
+    key=lambda ticker, period, interval: f"{ticker.upper()}:{period}:{interval}",
+)
 def getStockHistory(ticker: str, period: Period, interval: Interval):
     try:
         stockData = yf.Ticker(ticker)
@@ -289,6 +321,7 @@ def getStockOverviewWebScraping(ticker: str):
     except Exception as e:
         raise RuntimeError(f"Unexpected error: {str(e)}")
 
+@cached("overview", *OVERVIEW_TTL, key=lambda ticker: ticker.upper())
 def getStockOverview(ticker: str):
     """
     Get stock overview data with fallback mechanism
@@ -306,6 +339,13 @@ def getStockOverview(ticker: str):
             raise RuntimeError(f"Both yfinance and web scraping failed for {ticker} overview. yfinance error: {str(e)}, web scraping error: {str(web_error)}")
 
 def getStockNews(max_articles: int = 20):
+    """Latest news, sliced from one cached fetch so different page sizes share a cache entry."""
+    return _fetchStockNews()[:max_articles]
+
+
+@cached("news", *NEWS_TTL, key=lambda: "all-stocks")
+def _fetchStockNews():
+    max_articles = NEWS_FETCH_LIMIT
     try:
         url = 'https://stockanalysis.com/news/all-stocks/'
         response = httpx.get(url)
@@ -381,17 +421,13 @@ def getDefaultIndexes(default_etfs):
         raise RuntimeError(f"Failed to fetch default ETFs: {str(e)}")
 
 
+@cached("day_gainers", *SCREENER_TTL, key=lambda limit=5, min_price=4.0: f"{limit}:{min_price}")
 def getTopGainers(limit: int = 5, min_price: float = 4.0):
     """
     Get top gainers using yfinance day_gainers screener.
     Filters out stocks below min_price to exclude penny stocks.
-    Results are cached in Redis for SCREENER_CACHE_TTL seconds.
+    Results are cached in Redis (see SCREENER_TTL).
     """
-    cache_key = f"day_gainers:{limit}:{min_price}"
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
-
     try:
         result = yf.screen('day_gainers', count=limit * 4)
         quotes = result.get('quotes', [])
@@ -407,23 +443,18 @@ def getTopGainers(limit: int = 5, min_price: float = 4.0):
                 })
             if len(valid) >= limit:
                 break
-        _cache_set(cache_key, valid)
         return valid
     except Exception as e:
         raise RuntimeError(f"Failed to fetch top gainers: {str(e)}")
 
 
+@cached("day_losers", *SCREENER_TTL, key=lambda limit=5, min_price=4.0: f"{limit}:{min_price}")
 def getTopLosers(limit: int = 5, min_price: float = 4.0):
     """
     Get top losers using yfinance day_losers screener.
     Filters out stocks below min_price to exclude penny stocks.
-    Results are cached in Redis for SCREENER_CACHE_TTL seconds.
+    Results are cached in Redis (see SCREENER_TTL).
     """
-    cache_key = f"day_losers:{limit}:{min_price}"
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
-
     try:
         result = yf.screen('day_losers', count=limit * 4)
         quotes = result.get('quotes', [])
@@ -439,23 +470,18 @@ def getTopLosers(limit: int = 5, min_price: float = 4.0):
                 })
             if len(valid) >= limit:
                 break
-        _cache_set(cache_key, valid)
         return valid
     except Exception as e:
         raise RuntimeError(f"Failed to fetch top losers: {str(e)}")
 
 
+@cached("most_actives", *SCREENER_TTL, key=lambda limit=5, min_price=4.0: f"{limit}:{min_price}")
 def getMostActive(limit: int = 5, min_price: float = 4.0):
     """
     Get most actively traded stocks using yfinance most_actives screener.
     Filters out stocks below min_price to exclude penny stocks.
-    Results are cached in Redis for SCREENER_CACHE_TTL seconds.
+    Results are cached in Redis (see SCREENER_TTL).
     """
-    cache_key = f"most_actives:{limit}:{min_price}"
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
-
     try:
         result = yf.screen('most_actives', count=limit * 4)
         quotes = result.get('quotes', [])
@@ -472,7 +498,6 @@ def getMostActive(limit: int = 5, min_price: float = 4.0):
                 })
             if len(valid) >= limit:
                 break
-        _cache_set(cache_key, valid)
         return valid
     except Exception as e:
         raise RuntimeError(f"Failed to fetch most active stocks: {str(e)}")

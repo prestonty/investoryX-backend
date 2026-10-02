@@ -54,11 +54,13 @@ def stages(monkeypatch: pytest.MonkeyPatch) -> dict:
 def test_stages_run_in_order_for_the_same_day(stages) -> None:
     result = pipeline_module.run_pipeline(day=TRADING_DAY)
 
+    # Yesterday's orders fill at today's open before today's close is evaluated,
+    # so strategies see the portfolio after those fills.
     assert stages["calls"] == [
         ("fetch", TRADING_DAY),
-        ("evaluate", TRADING_DAY),
         ("execute", TRADING_DAY),
         ("reconcile", None),
+        ("evaluate", TRADING_DAY),
     ]
     assert result["day"] == "2024-03-08"
     assert result["trades_executed"]["executed"] == 0
@@ -71,7 +73,7 @@ def test_non_trading_day_does_nothing(stages) -> None:
     assert stages["calls"] == []
 
 
-def test_missing_prices_stop_before_evaluation(stages) -> None:
+def test_missing_prices_stop_before_execution(stages) -> None:
     stages["bars"] = 0
 
     with pytest.raises(pipeline_module.MissingPriceDataError):

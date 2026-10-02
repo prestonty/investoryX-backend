@@ -25,6 +25,8 @@ from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_trade import SimulatorTrade
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
+from src.models.stocks import Stocks
+from src.models.user_session import UserSession
 from src.models.users import Users
 
 _TABLES = [
@@ -36,6 +38,8 @@ _TABLES = [
     SimulatorCashLedger.__table__,
     SimulatorPosition.__table__,
     PriceBar.__table__,
+    UserSession.__table__,
+    Stocks.__table__,
 ]
 
 
@@ -104,6 +108,8 @@ class TradingDb:
         status: str = "Active Trading",
         strategy_name: str = "sma_crossover",
         tickers: tuple[str, ...] = ("AAPL",),
+        strategy_params: dict | None = None,
+        max_position_pct: str | None = None,
     ) -> None:
         if user_id is not None and self.get(Users, user_id) is None:
             self.add(Users(user_id=user_id, name="u", email="u@x", password="p", is_active=True))
@@ -116,6 +122,8 @@ class TradingDb:
                 cash_balance=Decimal(cash),
                 status=status,
                 strategy_name=strategy_name,
+                strategy_params=strategy_params,
+                max_position_pct=Decimal(max_position_pct) if max_position_pct else None,
             )
         )
         self.add(
@@ -129,6 +137,14 @@ class TradingDb:
                 for ticker in tickers
             ]
         )
+
+    def access_token(self, user_id: int) -> str:
+        """Log the user in (creates a real session) and return its access token."""
+        from src.core.sessions import start_session
+
+        with self.session() as session:
+            access, _refresh = start_session(session, session.get(Users, user_id))
+        return access
 
     def bars(self, symbol: str, days: list[date], close: str = "100") -> None:
         self.add(

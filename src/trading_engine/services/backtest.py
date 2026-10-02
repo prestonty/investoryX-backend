@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from bisect import bisect_right
 from dataclasses import dataclass, field, asdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, select
@@ -13,16 +14,25 @@ from src.models.simulator import Simulator
 from src.models.simulator_cash_ledger import SimulatorCashLedger
 from src.models.simulator_trade import SimulatorTrade
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
+from src.trading_engine.strategies.catalog import DEFAULT_STRATEGY_NAME
 
 from .actions import SignalAction
-from .evaluation import EvaluationService
+from .evaluation import EvaluationService, filter_to_fresh_symbols, one_signal_per_ticker
+from .execution import (
+    ExecutionRules,
+    Fill,
+    FillRejected,
+    plan_fill,
+    portfolio_equity,
+)
 from .portfolio import PortfolioSnapshot, Position
-from .pricing import PriceBar, YahooPriceProvider, _is_trading_day
+from .pricing import MARKET_TZ, PriceBar, YahooPriceProvider, _is_trading_day
+from .strategy import Signal, StrategyService
 
 logger = logging.getLogger("investoryx.trading_engine.backtest")
 
-FEE_PER_TRADE = Decimal("0")
-SLIPPAGE_BPS = Decimal("0")
+BACKTEST_SOURCE = "backtest"
+MARKET_OPEN = time(9, 30)
 
 
 @dataclass
@@ -69,8 +79,34 @@ class BacktestResult:
         return d
 
 
+@dataclass
+class _BacktestRun:
+    """Everything a backtest carries from one simulated day to the next."""
+
+    simulator: Simulator
+    strategy_service: StrategyService
+    strategy_name: str
+    params: dict
+    rules: ExecutionRules
+    bars: list[PriceBar]  # sorted by day
+    bar_days: list[date]  # bars' days, for slicing history up to a day
+    price_index: dict[date, dict[str, PriceBar]]
+    cash: Decimal
+    holdings: dict[str, Decimal] = field(default_factory=dict)
+    last_close: dict[str, Decimal] = field(default_factory=dict)
+    # Yesterday's decisions, filled at today's open.
+    pending: dict[str, Signal] = field(default_factory=dict)
+    trades: list[SimulatorTrade] = field(default_factory=list)
+    ledger: list[SimulatorCashLedger] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
 class BacktestService:
-    """Runs a trading strategy across a historical date range for a given simulator.
+    """Replays a simulator's strategy over a historical date range.
+
+    Each simulated day mirrors the live pipeline: the previous day's signals
+    fill at this day's open under the same execution rules (fees, slippage,
+    risk caps), then the strategy evaluates this day's close.
 
     State is purely ephemeral — the simulator's live cash_balance and positions
     are never mutated. Only `simulator_trades` and `simulator_cash_ledger` receive
@@ -82,7 +118,6 @@ class BacktestService:
         simulator_id: int,
         start_date: date,
         end_date: date,
-        price_mode: str = "close",
         clear_previous: bool = True,
     ) -> BacktestResult:
         session = SessionLocal()
@@ -92,7 +127,6 @@ class BacktestService:
                 simulator_id=simulator_id,
                 start_date=start_date,
                 end_date=end_date,
-                price_mode=price_mode,
                 clear_previous=clear_previous,
             )
         finally:
@@ -104,11 +138,11 @@ class BacktestService:
         simulator_id: int,
         start_date: date,
         end_date: date,
-        price_mode: str,
         clear_previous: bool,
     ) -> BacktestResult:
         simulator = self._load_simulator(session, simulator_id)
         tickers = self._load_tickers(session, simulator_id)
+        starting_cash = Decimal(str(simulator.starting_cash))
 
         if not tickers:
             return BacktestResult(
@@ -117,8 +151,8 @@ class BacktestService:
                 end_date=end_date,
                 trading_days_run=0,
                 total_trades=0,
-                starting_cash=Decimal(str(simulator.starting_cash)),
-                final_cash=Decimal(str(simulator.starting_cash)),
+                starting_cash=starting_cash,
+                final_cash=starting_cash,
                 pnl=Decimal("0"),
                 pnl_pct=Decimal("0"),
                 warnings=["No enabled tracked stocks found — nothing to backtest."],
@@ -127,203 +161,221 @@ class BacktestService:
         if clear_previous:
             self._clear_backtest_rows(session, simulator_id)
 
-        # Set up strategy evaluation
+        run = self._prepare_run(simulator, tickers, start_date, end_date)
+        trading_days = [d for d in _date_range(start_date, end_date) if _is_trading_day(d)]
+        day_results = [self._simulate_day(run, day) for day in trading_days]
+
+        if run.pending:
+            run.warnings.append(
+                f"{len(run.pending)} signal(s) from the final day would fill "
+                "at the next open, after the backtest ends"
+            )
+
+        # Bulk persist all rows. The simulator's live cash_balance is intentionally
+        # left untouched; the backtest outcome is reported via the result instead.
+        session.add_all(run.trades)
+        session.add_all(run.ledger)
+        session.commit()
+
+        return self._build_result(run, start_date, end_date, trading_days, day_results)
+
+    def _prepare_run(
+        self,
+        simulator: Simulator,
+        tickers: list[str],
+        start_date: date,
+        end_date: date,
+    ) -> _BacktestRun:
         evaluation_service = EvaluationService()
-        strategy_registry = evaluation_service.build_strategy_registry()
-        from .strategy import StrategyService
-        strategy_service = StrategyService(strategy_registry)
-        strategy_name = getattr(simulator, "strategy_name", None) or "sma_crossover"
-        strategy_params: dict = {}
+        strategy_name = simulator.strategy_name or DEFAULT_STRATEGY_NAME
+        params = evaluation_service.resolve_strategy_params(
+            strategy_name, simulator.strategy_params
+        )
 
         # Fetch all price data in one bulk call, with enough lookback for the
-        # strategy's longest window to be usable from the first backtest day.
-        long_window = evaluation_service.resolve_long_window(strategy_params, strategy_name)
-        lookback_days = long_window + evaluation_service.resolve_buffer_days(
-            strategy_params, long_window
+        # strategy's history to be usable from the first backtest day.
+        lookback_start = start_date - timedelta(
+            days=evaluation_service.resolve_history_days(params, strategy_name)
         )
-        lookback_start = start_date - timedelta(days=lookback_days)
         logger.info(
             "Fetching price bars for %s from %s to %s",
             tickers,
             lookback_start.isoformat(),
             end_date.isoformat(),
         )
-        provider = YahooPriceProvider()
-        all_bars = provider.fetch_daily_bars_range(tickers, lookback_start, end_date)
+        bars = YahooPriceProvider().fetch_daily_bars_range(tickers, lookback_start, end_date)
+        bars.sort(key=lambda bar: (bar.day, bar.symbol))
 
-        # Build price index: day -> symbol -> PriceBar
         price_index: dict[date, dict[str, PriceBar]] = {}
-        for bar in all_bars:
+        for bar in bars:
             price_index.setdefault(bar.day, {})[bar.symbol] = bar
 
-        # Build ordered list of all bars up to each day (for strategy lookback)
-        all_bars_sorted = sorted(all_bars, key=lambda b: (b.symbol, b.day))
+        return _BacktestRun(
+            simulator=simulator,
+            strategy_service=StrategyService(evaluation_service.build_strategy_registry()),
+            strategy_name=strategy_name,
+            params=params,
+            rules=ExecutionRules.for_simulator(simulator),
+            bars=bars,
+            bar_days=[bar.day for bar in bars],
+            price_index=price_index,
+            cash=Decimal(str(simulator.starting_cash)),
+        )
 
-        # Ephemeral portfolio state seeded from starting_cash
-        starting_cash = Decimal(str(simulator.starting_cash))
-        cash = starting_cash
-        holdings: dict[str, Decimal] = {}  # symbol -> shares
+    def _simulate_day(self, run: _BacktestRun, day: date) -> BacktestDayResult:
+        day_prices = run.price_index.get(day, {})
+        trades_before = len(run.trades)
+        skipped = self._fill_pending_at_open(run, day, day_prices)
 
-        trading_days = [
-            d
-            for d in _date_range(start_date, end_date)
-            if _is_trading_day(d)
-        ]
+        signals = self._evaluate_close(run, day)
+        for symbol, bar in day_prices.items():
+            run.last_close[symbol] = bar.close
 
-        accumulated_trades: list[SimulatorTrade] = []
-        accumulated_ledger: list[SimulatorCashLedger] = []
-        day_results: list[BacktestDayResult] = []
-        warnings: list[str] = []
+        return BacktestDayResult(
+            day=day,
+            signals_generated=len(signals),
+            trades_executed=len(run.trades) - trades_before,
+            cash_after=run.cash,
+            skipped_tickers=skipped,
+        )
 
-        for day in trading_days:
-            # Slice bars up to and including this day for strategy lookback
-            day_bars = [b for b in all_bars_sorted if b.day <= day]
-            if not day_bars:
-                warnings.append(f"{day.isoformat()}: no price data available, skipping day")
+    def _fill_pending_at_open(
+        self,
+        run: _BacktestRun,
+        day: date,
+        day_prices: dict[str, PriceBar],
+    ) -> list[str]:
+        """Fill yesterday's signals at today's open; returns tickers with no bar today."""
+        marks = {**run.last_close, **{s: bar.open for s, bar in day_prices.items()}}
+        skipped: list[str] = []
+        for symbol, signal in run.pending.items():
+            bar = day_prices.get(symbol)
+            if bar is None:
+                skipped.append(symbol)
                 continue
-
-            positions = {
-                symbol: Position(
-                    symbol=symbol,
-                    quantity=qty,
-                    average_cost=Decimal("0"),
-                )
-                for symbol, qty in holdings.items()
-                if qty > 0
-            }
-            snapshot = PortfolioSnapshot(
-                user_id=int(simulator.user_id),
-                cash=cash,
-                positions=positions,
-                as_of=datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc),
-                simulator_id=simulator_id,
+            result = plan_fill(
+                side=signal.action,
+                quantity=signal.quantity,
+                market_price=bar.open,
+                cash=run.cash,
+                held_shares=run.holdings.get(symbol, Decimal("0")),
+                equity=portfolio_equity(run.cash, run.holdings, marks),
+                rules=run.rules,
             )
-
-            try:
-                raw_signals = strategy_service.evaluate(
-                    strategy_name=strategy_name,
-                    prices=day_bars,
-                    portfolio=snapshot,
-                    params=strategy_params,
-                )
-                signals = evaluation_service.validate_signal_batch(raw_signals)
-            except Exception as exc:
-                warnings.append(f"{day.isoformat()}: strategy evaluation failed — {exc}")
-                day_results.append(BacktestDayResult(
-                    day=day,
-                    signals_generated=0,
-                    trades_executed=0,
-                    cash_after=cash,
-                    skipped_tickers=[],
-                ))
+            if isinstance(result, FillRejected):
                 continue
+            self._apply_fill(run, symbol, result, day)
+        run.pending = {}
+        return skipped
 
-            day_trades = 0
-            skipped: list[str] = []
-            day_price_map = price_index.get(day, {})
+    def _apply_fill(self, run: _BacktestRun, symbol: str, fill: Fill, day: date) -> None:
+        run.cash += fill.cash_delta
+        held = run.holdings.get(symbol, Decimal("0"))
+        held += fill.quantity if fill.side is SignalAction.BUY else -fill.quantity
+        if held > 0:
+            run.holdings[symbol] = held
+        else:
+            run.holdings.pop(symbol, None)
 
-            for signal in signals:
-                if signal.action.value == SignalAction.HOLD.value:
-                    continue
+        simulator_id = int(run.simulator.simulator_id)
+        run.trades.append(SimulatorTrade(
+            simulator_id=simulator_id,
+            ticker=symbol,
+            side=fill.side.value,
+            price=fill.price,
+            shares=fill.quantity,
+            fee=fill.fee,
+            executed_at=datetime.combine(day, MARKET_OPEN, tzinfo=MARKET_TZ),
+            source=BACKTEST_SOURCE,
+            balance_after=run.cash,
+        ))
+        run.ledger.append(SimulatorCashLedger(
+            simulator_id=simulator_id,
+            delta=fill.cash_delta,
+            reason=fill.side.value,
+            balance_after=run.cash,
+            source=BACKTEST_SOURCE,
+        ))
 
-                symbol = signal.symbol.strip().upper()
-                price_bar = day_price_map.get(symbol)
-                if price_bar is None:
-                    skipped.append(symbol)
-                    continue
+    def _evaluate_close(self, run: _BacktestRun, day: date) -> list[Signal]:
+        """Run the strategy on prices up to this day's close; queue trades for the next open."""
+        history = filter_to_fresh_symbols(
+            run.bars[: bisect_right(run.bar_days, day)], day
+        )
+        if not history:
+            run.warnings.append(f"{day.isoformat()}: no price data available, skipping day")
+            return []
 
-                market_price = price_bar.close if price_mode == "close" else price_bar.open
-                quantity = signal.quantity
-
-                if signal.action == SignalAction.BUY:
-                    total_cost = market_price * quantity + FEE_PER_TRADE
-                    if total_cost > cash:
-                        continue  # insufficient cash — skip
-                    cash -= total_cost
-                    holdings[symbol] = holdings.get(symbol, Decimal("0")) + quantity
-                elif signal.action == SignalAction.SELL:
-                    held = holdings.get(symbol, Decimal("0"))
-                    if quantity > held:
-                        continue  # insufficient shares — skip
-                    proceeds = market_price * quantity - FEE_PER_TRADE
-                    cash += proceeds
-                    holdings[symbol] = held - quantity
-                    if holdings[symbol] <= 0:
-                        holdings.pop(symbol, None)
-                else:
-                    continue
-
-                executed_at = datetime.combine(day, datetime.min.time()).replace(tzinfo=timezone.utc)
-                accumulated_trades.append(SimulatorTrade(
-                    simulator_id=simulator_id,
-                    ticker=symbol,
-                    side=signal.action.value,
-                    price=market_price,
-                    shares=quantity,
-                    fee=FEE_PER_TRADE,
-                    executed_at=executed_at,
-                    source="backtest",
-                    balance_after=cash,
-                ))
-
-                ledger_delta = (
-                    -(market_price * quantity + FEE_PER_TRADE)
-                    if signal.action == SignalAction.BUY
-                    else (market_price * quantity - FEE_PER_TRADE)
+        snapshot = PortfolioSnapshot(
+            user_id=int(run.simulator.user_id),
+            cash=run.cash,
+            positions={
+                symbol: Position(symbol=symbol, quantity=qty, average_cost=Decimal("0"))
+                for symbol, qty in run.holdings.items()
+            },
+            as_of=datetime.combine(day, time(16, 0), tzinfo=MARKET_TZ),
+            simulator_id=int(run.simulator.simulator_id),
+        )
+        try:
+            signals = EvaluationService().validate_signal_batch(
+                run.strategy_service.evaluate(
+                    strategy_name=run.strategy_name,
+                    prices=history,
+                    portfolio=snapshot,
+                    params=run.params,
                 )
-                accumulated_ledger.append(SimulatorCashLedger(
-                    simulator_id=simulator_id,
-                    delta=ledger_delta,
-                    reason=signal.action.value,
-                    balance_after=cash,
-                    source="backtest",
-                ))
-                day_trades += 1
+            )
+        except Exception as exc:
+            run.warnings.append(f"{day.isoformat()}: strategy evaluation failed — {exc}")
+            return []
 
-            day_results.append(BacktestDayResult(
-                day=day,
-                signals_generated=len(signals),
-                trades_executed=day_trades,
-                cash_after=cash,
-                skipped_tickers=skipped,
-            ))
+        run.pending = {
+            symbol: signal
+            for symbol, signal in one_signal_per_ticker(signals).items()
+            if signal.action is not SignalAction.HOLD
+        }
+        return signals
 
-        # Bulk persist all rows. The simulator's live cash_balance is intentionally
-        # left untouched; the backtest outcome is reported via the result instead.
-        if accumulated_trades:
-            session.add_all(accumulated_trades)
-        if accumulated_ledger:
-            session.add_all(accumulated_ledger)
-        session.commit()
-
+    def _build_result(
+        self,
+        run: _BacktestRun,
+        start_date: date,
+        end_date: date,
+        trading_days: list[date],
+        day_results: list[BacktestDayResult],
+    ) -> BacktestResult:
         # Mark open positions to their last close on or before end_date, so a
         # backtest that ends holding shares isn't reported as a cash loss.
         holdings_value = Decimal("0")
-        for symbol, qty in holdings.items():
-            last_close = _last_close_on_or_before(all_bars_sorted, symbol, end_date)
+        for symbol, qty in run.holdings.items():
+            last_close = _last_close_on_or_before(run.bars, symbol, end_date)
             if last_close is None:
-                warnings.append(f"{symbol}: no closing price to value {qty} held shares")
+                run.warnings.append(f"{symbol}: no closing price to value {qty} held shares")
                 continue
             holdings_value += qty * last_close
-        final_equity = cash + holdings_value
 
+        starting_cash = Decimal(str(run.simulator.starting_cash))
+        final_equity = run.cash + holdings_value
         pnl = final_equity - starting_cash
-        pnl_pct = (pnl / starting_cash * Decimal("100")).quantize(Decimal("0.01")) if starting_cash else Decimal("0")
-
+        pnl_pct = (
+            (pnl / starting_cash * Decimal("100")).quantize(Decimal("0.01"))
+            if starting_cash
+            else Decimal("0")
+        )
         return BacktestResult(
-            simulator_id=simulator_id,
+            simulator_id=int(run.simulator.simulator_id),
             start_date=start_date,
             end_date=end_date,
             trading_days_run=len(trading_days),
-            total_trades=len(accumulated_trades),
+            total_trades=len(run.trades),
             starting_cash=starting_cash,
-            final_cash=cash,
+            final_cash=run.cash,
             pnl=pnl,
             pnl_pct=pnl_pct,
             holdings_value=holdings_value,
             final_equity=final_equity,
             day_results=day_results,
-            warnings=warnings,
+            warnings=run.warnings,
         )
 
     def _load_simulator(self, session: Session, simulator_id: int) -> Simulator:
@@ -346,13 +398,13 @@ class BacktestService:
         session.execute(
             delete(SimulatorTrade).where(
                 SimulatorTrade.simulator_id == simulator_id,
-                SimulatorTrade.source == "backtest",
+                SimulatorTrade.source == BACKTEST_SOURCE,
             )
         )
         session.execute(
             delete(SimulatorCashLedger).where(
                 SimulatorCashLedger.simulator_id == simulator_id,
-                SimulatorCashLedger.source == "backtest",
+                SimulatorCashLedger.source == BACKTEST_SOURCE,
             )
         )
         session.commit()
@@ -360,7 +412,7 @@ class BacktestService:
 
 def _last_close_on_or_before(bars: list[PriceBar], symbol: str, day: date) -> Decimal | None:
     closes = [bar.close for bar in bars if bar.symbol == symbol and bar.day <= day]
-    return closes[-1] if closes else None  # bars are sorted by (symbol, day)
+    return closes[-1] if closes else None  # bars are sorted by day
 
 
 def _date_range(start: date, end: date):

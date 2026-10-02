@@ -411,6 +411,14 @@ def _is_trading_day(day: date) -> bool:
     return day.weekday() < 5 and day not in _nyse_holidays(day.year)
 
 
+def previous_trading_day(day: date) -> date:
+    """The trading day before `day` (skipping weekends and NYSE holidays)."""
+    day -= timedelta(days=1)
+    while not _is_trading_day(day):
+        day -= timedelta(days=1)
+    return day
+
+
 def last_completed_trading_day(now: datetime | None = None) -> date:
     """Most recent trading day whose regular session has closed, in US/Eastern time."""
     now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)

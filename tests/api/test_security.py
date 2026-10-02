@@ -51,8 +51,8 @@ def _legacy_token(claims: dict, key: str = security.SECRET_KEY) -> str:
 
 # --- token types -------------------------------------------------------------
 
-def test_access_token_authenticates(client, user) -> None:
-    response = client.get("/api/auth/me", headers=_bearer(create_access_token({"sub": "1"})))
+def test_access_token_authenticates(client, db, user) -> None:
+    response = client.get("/api/auth/me", headers=_bearer(db.access_token(1)))
     assert response.status_code == 200
 
 
@@ -76,9 +76,10 @@ def test_refresh_accepts_legacy_untyped_refresh_cookie(client, user) -> None:
 
     response = client.post("/api/auth/refresh")
 
+    # The legacy token is converted into a session; the new tokens arrive as cookies.
     assert response.status_code == 200
-    new_token = response.json()["access_token"]
-    assert client.get("/api/auth/me", headers=_bearer(new_token)).status_code == 200
+    assert "access_token" not in response.json()
+    assert client.get("/api/auth/me").status_code == 200
 
 
 def test_refresh_rejects_access_token_cookie(client, user) -> None:
@@ -141,25 +142,25 @@ def test_dev_pipeline_requires_login(client, pipeline_calls) -> None:
     assert pipeline_calls == []
 
 
-def test_dev_pipeline_requires_dev_mode(client, user, pipeline_calls, monkeypatch) -> None:
+def test_dev_pipeline_requires_dev_mode(client, db, user, pipeline_calls, monkeypatch) -> None:
     monkeypatch.setattr(settings, "dev_mode", False)
-    response = client.post("/dev/run-pipeline", headers=_bearer(create_access_token({"sub": "1"})))
+    response = client.post("/dev/run-pipeline", headers=_bearer(db.access_token(1)))
     assert response.status_code == 403
     assert pipeline_calls == []
 
 
-def test_dev_pipeline_refuses_old_days(client, user, pipeline_calls) -> None:
+def test_dev_pipeline_refuses_old_days(client, db, user, pipeline_calls) -> None:
     response = client.post(
         "/dev/run-pipeline",
         params={"day": "2025-01-02"},
-        headers=_bearer(create_access_token({"sub": "1"})),
+        headers=_bearer(db.access_token(1)),
     )
     assert response.status_code == 400
     assert pipeline_calls == []
 
 
-def test_dev_pipeline_runs_for_logged_in_user(client, user, pipeline_calls) -> None:
-    response = client.post("/dev/run-pipeline", headers=_bearer(create_access_token({"sub": "1"})))
+def test_dev_pipeline_runs_for_logged_in_user(client, db, user, pipeline_calls) -> None:
+    response = client.post("/dev/run-pipeline", headers=_bearer(db.access_token(1)))
     assert response.status_code == 200
     assert pipeline_calls == [None]
 
@@ -174,11 +175,11 @@ def test_backtest_status_requires_task_to_belong_to_simulator(client, db, user, 
             self.state = "SUCCESS"
             self.result = {"simulator_id": 99, "pnl": "123"}
 
-    monkeypatch.setattr("celery.result.AsyncResult", _OtherUsersResult)
+    monkeypatch.setattr("src.celery_app.app.AsyncResult", _OtherUsersResult)
 
     response = client.get(
         "/api/simulator/5/backtest/status/some-task",
-        headers=_bearer(create_access_token({"sub": "1"})),
+        headers=_bearer(db.access_token(1)),
     )
 
     assert response.status_code == 404

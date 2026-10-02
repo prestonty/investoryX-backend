@@ -13,22 +13,18 @@ from src.models.simulator import SIMULATOR_STATUS_PAUSED, Simulator
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
-from src.trading_engine.strategies import (
-    SimpleMovingAverageStrategy,
-    Sma50x200CrossoverStrategy,
+from src.trading_engine.strategies.catalog import (
+    DEFAULT_STRATEGY_NAME,
+    build_registry,
+    effective_params,
+    history_bars,
 )
 
 from .actions import SignalAction
 from .execution import SignalExecutionStatus
 from .portfolio import PortfolioSnapshot, Position
 from .pricing import MARKET_CLOSE, MARKET_TZ, PriceBar, last_completed_trading_day
-from .strategy import (
-    Signal,
-    StrategyRegistry,
-    StrategyService,
-    PairsTradingStrategy,
-    AuctionLiquidityStrategy,
-)
+from .strategy import Signal, StrategyRegistry, StrategyService
 
 STATUS_OK = "ok"
 STATUS_ERROR = "error"
@@ -110,12 +106,21 @@ class EvaluationService:
 
         for simulator in targets:
             simulator_id = int(simulator.simulator_id)
-            strategy_name = global_strategy_name or getattr(simulator, "strategy_name", None) or "sma_crossover"
+            strategy_name = (
+                global_strategy_name or simulator.strategy_name or DEFAULT_STRATEGY_NAME
+            )
+            # Saved params belong to the simulator's own strategy only.
+            stored_params = (
+                simulator.strategy_params
+                if strategy_name == simulator.strategy_name
+                else None
+            )
             result = self._evaluate_one_simulator(
                 simulator_id=simulator_id,
                 strategy_service=strategy_service,
                 strategy_name=strategy_name,
-                params=params,
+                stored_params=stored_params,
+                overrides=params,
                 as_of_day=as_of_day,
             )
             simulator_results.append(result.to_dict())
@@ -144,7 +149,8 @@ class EvaluationService:
         simulator_id: int,
         strategy_service: StrategyService,
         strategy_name: str,
-        params: dict,
+        stored_params: dict | None,
+        overrides: dict,
         as_of_day: date,
     ) -> SimulatorEvaluationResult:
         try:
@@ -152,6 +158,7 @@ class EvaluationService:
                 return self._build_skipped_result(
                     simulator_id, STATUS_SKIPPED_ALREADY_EVALUATED
                 )
+            params = self.resolve_strategy_params(strategy_name, stored_params, overrides)
             snapshot = self.load_portfolio_snapshot(simulator_id)
             prices = self.load_price_history_for_portfolio(
                 simulator_id,
@@ -329,10 +336,10 @@ class EvaluationService:
             if not tickers:
                 return []
 
-            long_window = self.resolve_long_window(params, strategy_name)
-            buffer_days = self.resolve_buffer_days(params, long_window)
             end_day = as_of_day
-            start_day = end_day - timedelta(days=long_window + buffer_days)
+            start_day = end_day - timedelta(
+                days=self.resolve_history_days(params, strategy_name)
+            )
 
             prices_stmt = (
                 select(PriceBarModel)
@@ -356,44 +363,37 @@ class EvaluationService:
                 )
                 for row in rows
             ]
-            return self.filter_to_fresh_symbols(bars, as_of_day)
+            return filter_to_fresh_symbols(bars, as_of_day)
         finally:
             session.close()
 
-    def filter_to_fresh_symbols(self, bars: list[PriceBar], as_of_day: date) -> list[PriceBar]:
-        """Drop every symbol that has no bar for as_of_day.
-
-        Without today's bar a strategy would re-evaluate yesterday's prices and
-        repeat yesterday's decision, so stale symbols must not be evaluated.
-        """
-        fresh_symbols = {bar.symbol for bar in bars if bar.day == as_of_day}
-        return [bar for bar in bars if bar.symbol in fresh_symbols]
-
     def build_strategy_registry(self) -> StrategyRegistry:
-        registry = StrategyRegistry()
-        registry.register(SimpleMovingAverageStrategy())
-        registry.register(Sma50x200CrossoverStrategy())
-        registry.register(AuctionLiquidityStrategy())
-        registry.register(PairsTradingStrategy())
-        return registry
+        return build_registry()
 
-    def resolve_long_window(self, params: dict, strategy_name: str) -> int:
-        if "long_window" in params:
-            long_window = int(params["long_window"])
-        elif strategy_name == Sma50x200CrossoverStrategy.name:
-            long_window = 200
-        else:
-            long_window = 20
-        if long_window <= 0:
-            raise ValueError("long_window must be positive")
-        return long_window
+    def resolve_strategy_params(
+        self,
+        strategy_name: str,
+        stored_params: dict | None,
+        overrides: dict | None = None,
+    ) -> dict:
+        """The simulator's saved params (validated, defaults filled), then run overrides."""
+        params = effective_params(strategy_name, stored_params)
+        params.update(
+            {key: value for key, value in (overrides or {}).items() if key != "strategy_name"}
+        )
+        return params
 
-    def resolve_buffer_days(self, params: dict, long_window: int) -> int:
+    def resolve_history_days(self, params: dict, strategy_name: str) -> int:
+        """Calendar days of price history one evaluation of this strategy needs."""
+        bars = history_bars(strategy_name, params)
+        return bars + self.resolve_buffer_days(params, bars)
+
+    def resolve_buffer_days(self, params: dict, bars: int) -> int:
         if "buffer_days" in params:
             buffer_days = int(params["buffer_days"])
         else:
             # Calendar days contain weekends/holidays; widen history by default.
-            buffer_days = max(10, long_window)
+            buffer_days = max(10, bars)
         if buffer_days < 0:
             raise ValueError("buffer_days must be >= 0")
         return buffer_days
@@ -438,11 +438,7 @@ class EvaluationService:
         if not signals:
             return []
 
-        # At most one signal per ticker per day (the unique constraint's shape).
-        by_ticker: dict[str, Signal] = {}
-        for signal in signals:
-            by_ticker.setdefault(signal.symbol.strip().upper(), signal)
-
+        by_ticker = one_signal_per_ticker(signals)
         session = SessionLocal()
         try:
             rows = [
@@ -495,3 +491,21 @@ class EvaluationService:
             errors=errors,
             simulator_results=simulator_results,
         )
+
+
+def filter_to_fresh_symbols(bars: list[PriceBar], as_of_day: date) -> list[PriceBar]:
+    """Drop every symbol that has no bar for as_of_day.
+
+    Without today's bar a strategy would re-evaluate yesterday's prices and
+    repeat yesterday's decision, so stale symbols must not be evaluated.
+    """
+    fresh_symbols = {bar.symbol for bar in bars if bar.day == as_of_day}
+    return [bar for bar in bars if bar.symbol in fresh_symbols]
+
+
+def one_signal_per_ticker(signals: list[Signal]) -> dict[str, Signal]:
+    """At most one signal per ticker per day (the unique constraint's shape)."""
+    by_ticker: dict[str, Signal] = {}
+    for signal in signals:
+        by_ticker.setdefault(signal.symbol.strip().upper(), signal)
+    return by_ticker

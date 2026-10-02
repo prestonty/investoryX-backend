@@ -27,7 +27,11 @@ class MissingPriceDataError(RuntimeError):
 
 
 def run_pipeline(day: date | None = None, simulator_id: int | None = None) -> dict:
-    """Run fetch -> evaluate -> execute -> reconcile in order for one trading day.
+    """Run fetch -> execute -> reconcile -> evaluate in order for one trading day.
+
+    Execution fills the previous trading day's signals at this day's open, then
+    evaluation decides on this day's close; those signals fill at the next open.
+    Evaluating last means strategies see the portfolio after today's fills.
 
     Scoped to a single simulator when simulator_id is given (manual runs),
     otherwise covers every simulator (scheduled run).
@@ -48,7 +52,6 @@ def run_pipeline(day: date | None = None, simulator_id: int | None = None) -> di
                 f"No price bars fetched for {len(tickers)} tickers on {target_day.isoformat()}"
             )
 
-    evaluation = EvaluationService().run(as_of_day=target_day, simulator_id=simulator_id)
     execution = execute_signals(
         simulator_id=simulator_id,
         slippage_bps=settings.sim_slippage_bps,
@@ -56,6 +59,7 @@ def run_pipeline(day: date | None = None, simulator_id: int | None = None) -> di
         day=target_day,
     )
     reconciliation = reconcile_portfolios(simulator_id=simulator_id)
+    evaluation = EvaluationService().run(as_of_day=target_day, simulator_id=simulator_id)
 
     # Key names match the original /dev/run-pipeline response the frontend reads.
     return {

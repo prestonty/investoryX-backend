@@ -38,6 +38,9 @@ from src.models import (
     simulator_position,
     simulator_trade,
     simulator_cash_ledger,
+    simulator_signal,
+    price_bar,
+    user_session,
 )
 
 target_metadata = Base.metadata

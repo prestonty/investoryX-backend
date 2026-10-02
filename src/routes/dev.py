@@ -7,6 +7,7 @@ from src.core.rate_limit import RateLimit
 from src.core.security import get_current_active_user
 from src.models.users import Users
 from src.trading_engine.services.pricing import last_completed_trading_day
+from src.trading_engine.strategies.catalog import describe_strategies
 from src.trading_engine.tasks.daily_pipeline import MissingPriceDataError, run_pipeline
 
 router = APIRouter(prefix="/dev", tags=["dev"])
@@ -23,10 +24,10 @@ def get_flags():
 
 @router.get("/strategies")
 def get_strategies():
+    """Deprecated: kept for older frontends; use GET /api/strategies."""
     return [
-        {"value": "sma_crossover", "label": "SMA Crossover"},
-        {"value": "stat_arb_pairs", "label": "Pairs Trading (Stat Arb)"},
-        {"value": "auction_liquidity_provider", "label": "Auction Liquidity Provider"},
+        {"value": entry["value"], "label": entry["label"]}
+        for entry in describe_strategies()
     ]
 
 

@@ -5,7 +5,9 @@ from decimal import Decimal
 
 import pytest
 
+from src.models.price_bar import PriceBar
 from src.models.simulator_cash_ledger import SimulatorCashLedger
+from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_trade import SimulatorTrade
 from src.trading_engine.services.execution import ExecutionSummary
@@ -88,15 +90,20 @@ def test_execute_signals_rolls_back_on_error(monkeypatch: pytest.MonkeyPatch) ->
     assert session.closed is True
 
 
-TRADE_DAY = date(2024, 3, 8)
+TRADE_DAY = date(2024, 3, 8)  # Friday
+SIGNAL_DAY = date(2024, 3, 7)  # previous trading day: its close decided the order
 
 
-def _pending_buy(simulator_id: int = 1, for_day: date | None = TRADE_DAY) -> SimulatorSignal:
+def _pending_buy(
+    simulator_id: int = 1,
+    for_day: date | None = SIGNAL_DAY,
+    quantity: str = "2",
+) -> SimulatorSignal:
     return SimulatorSignal(
         simulator_id=simulator_id,
         ticker="AAPL",
         action="buy",
-        quantity=Decimal("2"),
+        quantity=Decimal(quantity),
         reason="test",
         confidence=Decimal("1"),
         strategy_name="sma_crossover",
@@ -107,7 +114,7 @@ def _pending_buy(simulator_id: int = 1, for_day: date | None = TRADE_DAY) -> Sim
 
 def test_signal_fails_without_bar_for_trade_day(db) -> None:
     db.simulator(1)
-    db.bars("AAPL", [TRADE_DAY - timedelta(days=1)])  # only yesterday's (stale) price
+    db.bars("AAPL", [SIGNAL_DAY])  # only the decision day's price, nothing to fill at
     db.add(_pending_buy())
 
     summary = execute_module.execute_signals(day=TRADE_DAY)
@@ -135,10 +142,10 @@ def test_executed_trade_writes_ledger_row(db) -> None:
     assert (ledger.reason, ledger.source) == ("buy", "live")
 
 
-@pytest.mark.parametrize("for_day", [TRADE_DAY - timedelta(days=1), None])
+@pytest.mark.parametrize("for_day", [SIGNAL_DAY - timedelta(days=1), None])
 def test_stale_or_undated_signal_expires_instead_of_filling(db, for_day) -> None:
     db.simulator(1, cash="1000")
-    db.bars("AAPL", [TRADE_DAY - timedelta(days=1), TRADE_DAY], close="100")
+    db.bars("AAPL", [SIGNAL_DAY, TRADE_DAY], close="100")
     db.add(_pending_buy(for_day=for_day))  # e.g. left pending by a failed run
 
     summary = execute_module.execute_signals(day=TRADE_DAY)
@@ -148,3 +155,72 @@ def test_stale_or_undated_signal_expires_instead_of_filling(db, for_day) -> None
     assert signal.status == "skipped"
     assert signal.execution_error.startswith("expired")
     assert db.all(SimulatorTrade) == []
+
+
+def test_fills_at_trade_day_open_not_close(db) -> None:
+    db.simulator(1, cash="1000")
+    db.add(PriceBar(
+        symbol="AAPL", day=TRADE_DAY, open=Decimal("90"), high=Decimal("110"),
+        low=Decimal("85"), close=Decimal("105"), volume=1000, source="yfinance",
+    ))
+    db.add(_pending_buy())
+
+    execute_module.execute_signals(day=TRADE_DAY)
+
+    [trade] = db.all(SimulatorTrade)
+    assert trade.price == Decimal("90")
+
+
+def test_signal_from_trade_day_waits_for_next_open(db) -> None:
+    db.simulator(1, cash="1000")
+    db.bars("AAPL", [TRADE_DAY], close="100")
+    db.add(_pending_buy(for_day=TRADE_DAY))  # decided on today's close
+
+    summary = execute_module.execute_signals(day=TRADE_DAY)
+
+    assert summary.processed == 0
+    [signal] = db.all(SimulatorSignal)
+    assert signal.status == "pending"
+
+
+def test_max_position_pct_shrinks_buy_to_whole_shares(db) -> None:
+    # Equity 1000, cap 25% -> at most $250 in AAPL -> 2 shares at $100.
+    db.simulator(1, cash="1000", max_position_pct="25")
+    db.bars("AAPL", [TRADE_DAY], close="100")
+    db.add(_pending_buy(quantity="5"))
+
+    summary = execute_module.execute_signals(day=TRADE_DAY)
+
+    assert summary.executed == 1
+    [trade] = db.all(SimulatorTrade)
+    assert trade.shares == Decimal("2")
+
+
+def test_max_position_pct_counts_shares_already_held(db) -> None:
+    # Already 2 x $100 of a 1200 equity portfolio; 25% cap leaves $100 -> 1 share.
+    db.simulator(1, cash="1000", max_position_pct="25")
+    db.add(SimulatorPosition(
+        simulator_id=1, ticker="AAPL", shares=Decimal("2"), avg_cost=Decimal("100"),
+    ))
+    db.bars("AAPL", [TRADE_DAY], close="100")
+    db.add(_pending_buy(quantity="5"))
+
+    execute_module.execute_signals(day=TRADE_DAY)
+
+    [trade] = db.all(SimulatorTrade)
+    assert trade.shares == Decimal("1")
+
+
+def test_buy_fails_when_position_is_already_at_cap(db) -> None:
+    db.simulator(1, cash="300", max_position_pct="25")
+    db.add(SimulatorPosition(
+        simulator_id=1, ticker="AAPL", shares=Decimal("1"), avg_cost=Decimal("100"),
+    ))
+    db.bars("AAPL", [TRADE_DAY], close="100")
+    db.add(_pending_buy())
+
+    summary = execute_module.execute_signals(day=TRADE_DAY)
+
+    assert summary.failed == 1
+    [signal] = db.all(SimulatorSignal)
+    assert signal.execution_error == "exceeds max_position_pct"

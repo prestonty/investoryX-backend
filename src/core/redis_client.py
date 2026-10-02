@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from urllib.parse import urlsplit, urlunsplit
 
 import redis
 
@@ -16,8 +17,19 @@ _client: redis.Redis | None = None
 _unavailable_until = 0.0
 
 
+# Cache and rate-limit keys live in their own logical db so they can be flushed
+# without touching Celery's queue (db 0). All of them have TTLs, so with
+# maxmemory-policy volatile-lru they're evicted first and the queue never is.
+CACHE_DB = 2
+
+
 def _redis_url() -> str:
-    return os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    explicit = os.getenv("CACHE_REDIS_URL")
+    if explicit:
+        return explicit
+    base = os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL") or "redis://localhost:6379"
+    parts = urlsplit(base)
+    return urlunsplit((parts.scheme, parts.netloc, f"/{CACHE_DB}", parts.query, parts.fragment))
 
 
 def get_redis() -> redis.Redis | None:

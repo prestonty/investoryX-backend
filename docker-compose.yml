@@ -37,7 +37,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       DISABLE_EMAIL_VERIFICATION: ${DISABLE_EMAIL_VERIFICATION:-false}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      # Task results live in Postgres (durable); Redis only carries the queue.
+      CELERY_RESULT_BACKEND: db+${DATABASE_URL}
     command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "debug", "--access-log", "--reload"]
     volumes:
       - .:/app
@@ -56,7 +57,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      # Task results live in Postgres (durable); Redis only carries the queue.
+      CELERY_RESULT_BACKEND: db+${DATABASE_URL}
       CELERY_TIMEZONE: ${CELERY_TIMEZONE:-America/New_York}
     command: ["celery", "-A", "src.celery_app.app", "worker", "-l", "info", "--pool=solo"]
     volumes:
@@ -74,7 +76,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/1}
+      # Task results live in Postgres (durable); Redis only carries the queue.
+      CELERY_RESULT_BACKEND: db+${DATABASE_URL}
       CELERY_TIMEZONE: ${CELERY_TIMEZONE:-America/New_York}
       CELERY_BEAT_ENABLED: ${CELERY_BEAT_ENABLED:-true}
     command: ["celery", "-A", "src.celery_app.app", "beat", "-l", "info"]
@@ -88,6 +91,9 @@ services:
 
   redis:
     image: redis:7
+    # Cache/rate-limit keys all have TTLs, so volatile-lru evicts them first and
+    # never evicts Celery's queue (which has no TTLs). Match this on Railway.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
     ports:
       - "6379:6379"
     healthcheck:

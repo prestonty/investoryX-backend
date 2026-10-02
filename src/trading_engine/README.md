@@ -14,6 +14,12 @@ Paper-trading engine for InvestoryX. This module will run scheduled jobs that fe
 3. Execute paper trades based on signals
 4. Reconcile portfolio state and performance
 
+The daily run (`tasks/daily_pipeline.py`) executes these as fetch → execute →
+reconcile → evaluate: a signal decided on day D's close fills at day D+1's open,
+so each run first fills the previous trading day's signals, then evaluates the
+new close. Backtests (`services/backtest.py`) simulate every day the same way and
+size orders with the same `plan_fill()` and `ExecutionRules` as live execution.
+
 ### 1. Fetch Price Data (Daily Open/Close)
 - Purpose: Build reliable market data inputs before any strategy decision is made.
 - What happens:
@@ -31,7 +37,9 @@ Paper-trading engine for InvestoryX. This module will run scheduled jobs that fe
 ### 2. Evaluate Strategies and Generate Signals
 - Purpose: Convert market data + current portfolio context into explicit decisions.
 - What happens:
-  - Load each simulator's strategy configuration and tunable params.
+  - Load each simulator's strategy and its saved params (`simulators.strategy_params`,
+    validated by the models in `strategies/params.py`; `strategies/catalog.py` lists
+    every strategy).
   - Build a portfolio snapshot (cash + current positions).
   - Run strategy logic against recent prices.
   - Persist one signal per decision (`buy`, `sell`, or `hold`) with reason/confidence.
@@ -48,7 +56,11 @@ Paper-trading engine for InvestoryX. This module will run scheduled jobs that fe
 - Purpose: Turn valid executable signals into simulated fills and immutable trade records.
 - What happens:
   - Read `pending` signals in deterministic order.
-  - Validate each signal and load latest reference price.
+  - Validate each signal; only signals from the previous trading day are due, and
+    they fill at the trade day's open (older ones expire).
+  - Size each order with `plan_fill()`: fees, slippage, and risk caps
+    (`max_position_pct` per simulator, `SIM_MAX_ORDER_VALUE` platform-wide) shrink
+    buys to the whole shares that fit.
   - Apply execution/risk checks (cash available, shares available, positive quantity).
   - Create `simulator_trades` rows for executed signals and mark signal status (`executed`, `skipped`, or `failed`).
 - Input:
