@@ -1,6 +1,14 @@
 # Tests
 
-This folder contains backend test suites, including trading engine unit tests.
+A small suite: end-to-end tests for the essential flows, plus unit tests for
+isolated trading-engine logic. Mostly happy paths.
+
+- `trading_engine/test_simulator_flow.py` — end to end: create a simulator, set
+  its strategy, add a stock, run two days, check the next-open fill and portfolio.
+- `api/` — end to end: register, login/refresh/logout, stock lookup.
+- `trading_engine/services/` — unit: fill rules, portfolio replay, strategies,
+  strategy params, trading calendar, backtest.
+- `services/test_cache.py` — unit: market-data cache.
 
 ## Prerequisites
 
@@ -26,13 +34,13 @@ poetry run pytest tests
 ## Run One Test File
 
 ```bash
-poetry run pytest tests/trading_engine/tasks/test_execute_paper_trades.py
+poetry run pytest tests/trading_engine/test_simulator_flow.py
 ```
 
 ## Run One Test Function
 
 ```bash
-poetry run pytest tests/trading_engine/tasks/test_execute_paper_trades.py -k test_record_paper_trades_returns_json_safe_dict
+poetry run pytest tests/trading_engine/services/test_execution_rules.py -k test_max_position_pct_shrinks_buy_to_whole_shares
 ```
 
 ## Optional PowerShell Shortcut

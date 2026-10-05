@@ -5,7 +5,7 @@ import os
 # Prevent import-time failure in src.api.database.database during test discovery.
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
-# Rate limits are exercised explicitly in tests/api/test_rate_limit.py.
+# Rate limits would make repeated API calls in a test flaky.
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 import importlib
@@ -109,7 +109,6 @@ class TradingDb:
         strategy_name: str = "sma_crossover",
         tickers: tuple[str, ...] = ("AAPL",),
         strategy_params: dict | None = None,
-        max_position_pct: str | None = None,
     ) -> None:
         if user_id is not None and self.get(Users, user_id) is None:
             self.add(Users(user_id=user_id, name="u", email="u@x", password="p", is_active=True))
@@ -123,7 +122,6 @@ class TradingDb:
                 status=status,
                 strategy_name=strategy_name,
                 strategy_params=strategy_params,
-                max_position_pct=Decimal(max_position_pct) if max_position_pct else None,
             )
         )
         self.add(
@@ -137,14 +135,6 @@ class TradingDb:
                 for ticker in tickers
             ]
         )
-
-    def access_token(self, user_id: int) -> str:
-        """Log the user in (creates a real session) and return its access token."""
-        from src.core.sessions import start_session
-
-        with self.session() as session:
-            access, _refresh = start_session(session, session.get(Users, user_id))
-        return access
 
     def bars(self, symbol: str, days: list[date], close: str = "100") -> None:
         self.add(
