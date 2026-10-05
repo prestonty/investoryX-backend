@@ -100,6 +100,33 @@ def get_all_enabled_simulator_tickers(simulator_id: int | None = None) -> list[s
         session.close()
 
 
+def backfill_symbol_history(symbol: str, start_day: date, end_day: date) -> int:
+    """Download and store a symbol's daily bars unless they're already stored. Returns bars stored."""
+    if has_price_history(symbol, start_day, end_day):
+        return 0
+    bars = YahooPriceProvider().fetch_daily_bars_range([symbol], start_day, end_day)
+    if not bars:
+        logger.warning("No price history found for %s from %s to %s", symbol, start_day, end_day)
+        return 0
+    return SqlPriceBarRepository().upsert_bars(bars)
+
+
+def count_price_bars(symbol: str, start_day: date, end_day: date) -> int:
+    session = SessionLocal()
+    try:
+        stmt = (
+            select(func.count())
+            .select_from(PriceBarModel)
+            .where(PriceBarModel.symbol == symbol)
+            .where(PriceBarModel.source == "yfinance")
+            .where(PriceBarModel.day >= start_day)
+            .where(PriceBarModel.day <= end_day)
+        )
+        return int(session.execute(stmt).scalar_one())
+    finally:
+        session.close()
+
+
 def has_price_history(symbol: str, start_day: date, end_day: date) -> bool:
     """True if stored bars for symbol already span start_day..end_day (a week's slack each end).
 

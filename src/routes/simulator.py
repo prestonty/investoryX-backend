@@ -29,6 +29,7 @@ from src.schemas.simulator import (
     SimulatorPositionResponse,
     SimulatorTradeResponse,
     SimulatorCashLedgerResponse,
+    SimulatorDecisionResponse,
     MessageResponse,
     SimulatorRunResponse,
     SimulatorRunRequest,
@@ -44,13 +45,17 @@ from src.trading_engine.services.evaluation import (
 )
 from src.trading_engine.services.actions import SignalAction
 from src.trading_engine.services.execution import SignalExecutionStatus
+from src.trading_engine.services.history import (
+    InsufficientPriceHistoryError,
+    ensure_price_history,
+)
 from src.trading_engine.strategies.catalog import (
     DEFAULT_STRATEGY_NAME,
     InvalidStrategyParams,
+    effective_params,
     params_to_store,
 )
 from src.trading_engine.tasks.daily_pipeline import MissingPriceDataError, run_pipeline
-from src.trading_engine.tasks.fetch_prices import backfill_ticker_history
 
 
 router = APIRouter(prefix="/api/simulator", tags=["simulator"])
@@ -131,13 +136,18 @@ def update_simulator_settings(
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
 
+    # Validate a strategy change before changing anything, so a rejected one saves nothing.
+    strategy_update = _resolve_strategy_update(simulator, payload)
+    if strategy_update is not None:
+        _require_price_history(db, _enabled_tickers(db, simulator_id), *strategy_update)
+        simulator.strategy_name, simulator.strategy_params = strategy_update
+
     if "frequency" in payload.model_fields_set and payload.frequency is not None:
         simulator.frequency = payload.frequency
     if "max_position_pct" in payload.model_fields_set:
         simulator.max_position_pct = payload.max_position_pct
     if "max_daily_loss_pct" in payload.model_fields_set:
         simulator.max_daily_loss_pct = payload.max_daily_loss_pct
-    _apply_strategy_settings(simulator, payload)
 
     db.add(simulator)
     db.commit()
@@ -145,11 +155,14 @@ def update_simulator_settings(
     return SimulatorResponse.model_validate(simulator)
 
 
-def _apply_strategy_settings(
+def _resolve_strategy_update(
     simulator: Simulator,
     payload: SimulatorSettingsUpdateRequest,
-) -> None:
-    """Set strategy_name/strategy_params; params are always validated for the final strategy."""
+) -> tuple[str, dict | None] | None:
+    """The (strategy_name, params to store) the payload asks for, or None if unchanged.
+
+    Params are always validated against the final strategy.
+    """
     fields = payload.model_fields_set
     new_name = payload.strategy_name or simulator.strategy_name or DEFAULT_STRATEGY_NAME
     if "strategy_params" in fields:
@@ -158,14 +171,48 @@ def _apply_strategy_settings(
         # Another strategy's params don't apply; start from the new one's defaults.
         params = {}
     else:
-        return
+        return None
 
     try:
-        stored = params_to_store(new_name, params)
+        return new_name, params_to_store(new_name, params)
     except InvalidStrategyParams as exc:
         raise HTTPException(status_code=400, detail=f"Invalid strategy settings: {exc}")
-    simulator.strategy_name = new_name
-    simulator.strategy_params = stored
+
+
+def _enabled_tickers(db: Session, simulator_id: int) -> list[str]:
+    rows = (
+        db.query(SimulatorTrackedStock.ticker)
+        .filter(
+            SimulatorTrackedStock.simulator_id == simulator_id,
+            SimulatorTrackedStock.enabled.is_(True),
+        )
+        .all()
+    )
+    return sorted({ticker.strip().upper() for (ticker,) in rows if ticker})
+
+
+def _require_price_history(
+    db: Session,
+    symbols: list[str],
+    strategy_name: str,
+    params: dict | None,
+) -> None:
+    """400 with a user-facing message if these stocks can't support the strategy.
+
+    May download prices from Yahoo, so call it before making any changes: it ends
+    the request's read transaction rather than holding it open during the download.
+    """
+    if not symbols:
+        return
+    try:
+        effective = effective_params(strategy_name, params)
+    except InvalidStrategyParams:
+        effective = effective_params(strategy_name, None)
+    db.commit()  # nothing changed yet; just releases the transaction
+    try:
+        ensure_price_history(symbols, strategy_name, effective)
+    except InsufficientPriceHistoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("", response_model=List[SimulatorResponse])
@@ -218,11 +265,29 @@ def add_tracked_stock(
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
 
+    ticker = payload.ticker.strip().upper()
+    enabled = payload.enabled if payload.enabled is not None else True
+    already_tracked = (
+        db.query(SimulatorTrackedStock)
+        .filter(
+            SimulatorTrackedStock.simulator_id == simulator_id,
+            SimulatorTrackedStock.ticker == ticker,
+        )
+        .first()
+    )
+    if already_tracked:
+        raise HTTPException(status_code=400, detail="Tracked stock already exists")
+    if enabled:
+        # Loads the stock's price history now, so the strategy can trade it on the next run.
+        _require_price_history(
+            db, [ticker], simulator.strategy_name, simulator.strategy_params
+        )
+
     tracked = SimulatorTrackedStock(
         simulator_id=simulator_id,
-        ticker=payload.ticker.upper(),
+        ticker=ticker,
         target_allocation=payload.target_allocation,
-        enabled=payload.enabled if payload.enabled is not None else True,
+        enabled=enabled,
     )
     db.add(tracked)
     try:
@@ -233,17 +298,7 @@ def add_tracked_stock(
             status_code=400, detail="Tracked stock already exists"
         )
     db.refresh(tracked)
-    _queue_history_backfill(tracked.ticker)
     return tracked
-
-
-def _queue_history_backfill(ticker: str) -> None:
-    """Fetch the ticker's price history in the background so strategies can use it now."""
-    try:
-        backfill_ticker_history.delay(ticker)
-    except Exception:
-        # The stock is saved either way; the daily pipeline still adds a bar per day.
-        logger.exception("Failed to queue price history backfill for %s", ticker)
 
 
 @router.get("/{simulator_id}", response_model=SimulatorSummaryResponse)
@@ -299,7 +354,35 @@ def get_simulator_summary(
             SimulatorCashLedgerResponse.model_validate(item)
             for item in cash_ledger
         ],
+        decisions=[
+            SimulatorDecisionResponse.model_validate(signal)
+            for signal in _latest_decisions(db, simulator_id, [t.ticker for t in tracked_stocks])
+        ],
     )
+
+
+def _latest_decisions(
+    db: Session,
+    simulator_id: int,
+    tickers: list[str],
+) -> list[SimulatorSignal]:
+    """Most recent signal per tracked ticker (a simulator makes at most one per day)."""
+    if not tickers:
+        return []
+    signals = (
+        db.query(SimulatorSignal)
+        .filter(
+            SimulatorSignal.simulator_id == simulator_id,
+            SimulatorSignal.ticker.in_(tickers),
+        )
+        .order_by(SimulatorSignal.created_at.desc(), SimulatorSignal.signal_id.desc())
+        .limit(len(tickers) * 5)
+        .all()
+    )
+    latest: dict[str, SimulatorSignal] = {}
+    for signal in signals:
+        latest.setdefault(signal.ticker, signal)
+    return [latest[ticker] for ticker in tickers if ticker in latest]
 
 
 @router.post("/{simulator_id}/run", response_model=SimulatorRunResponse, dependencies=[Depends(RUN_LIMIT)])

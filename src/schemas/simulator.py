@@ -136,12 +136,30 @@ class SimulatorCashLedgerResponse(BaseModel):
         from_attributes = True
 
 
+class SimulatorDecisionResponse(BaseModel):
+    """The strategy's latest decision for one tracked stock, and what became of it."""
+
+    ticker: str
+    action: str  # buy | sell | hold
+    quantity: Decimal
+    reason: str
+    # pending = waiting for the next open; executed/skipped/failed after that.
+    status: str
+    execution_error: Optional[str] = None
+    for_day: Optional[date] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class SimulatorSummaryResponse(BaseModel):
     simulator: SimulatorResponse
     tracked_stocks: List[SimulatorTrackedStockResponse]
     positions: List[SimulatorPositionResponse]
     trades: List[SimulatorTradeResponse]
     cash_ledger: List[SimulatorCashLedgerResponse]
+    decisions: List[SimulatorDecisionResponse] = []
 
 
 class MessageResponse(BaseModel):

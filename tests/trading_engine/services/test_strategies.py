@@ -31,9 +31,10 @@ def test_pairs_buys_when_a_is_cheap() -> None:
     a_dip = [100 + (i % 2) for i in range(19)] + [70]
     prices = _bars("AAA", a_dip) + _bars("BBB", [100] * 20)
 
-    [signal] = PairsTradingStrategy().generate_signals(prices, _portfolio(), {})
+    signal, reference = PairsTradingStrategy().generate_signals(prices, _portfolio(), {})
 
     assert (signal.symbol, signal.action, signal.quantity) == ("AAA", SignalAction.BUY, Decimal("10"))
+    assert (reference.symbol, reference.action) == ("BBB", SignalAction.HOLD)
 
 
 def test_sma_50_200_buys_on_golden_cross() -> None:

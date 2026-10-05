@@ -87,6 +87,31 @@ class PairsTradingStrategy:
         portfolio: PortfolioSnapshot,
         params: dict,
     ) -> list[Signal]:
+        signals = self._trade_pair(prices, portfolio, params)
+        if not signals:
+            return signals
+        # Every other tracked stock gets a decision too, so the UI can explain it.
+        traded = signals[0].symbol
+        latest: dict[str, PriceBar] = {}
+        for bar in sorted(prices, key=lambda bar: bar.day):
+            latest[bar.symbol.upper()] = bar
+        return signals + [
+            self._hold_signal(
+                symbol,
+                f"Not traded: this pairs strategy only trades {traded}",
+                signals[0].created_at,
+                bar.close,
+            )
+            for symbol, bar in sorted(latest.items())
+            if symbol != traded
+        ]
+
+    def _trade_pair(
+        self,
+        prices: list[PriceBar],
+        portfolio: PortfolioSnapshot,
+        params: dict,
+    ) -> list[Signal]:
         window = int(params.get("window", 20))
         entry_threshold = Decimal(str(params.get("entry_threshold", "2.0")))
         trade_quantity = Decimal(str(params.get("trade_quantity", "10")))
@@ -253,6 +278,24 @@ class AuctionLiquidityStrategy:
                     price=latest_bar.close,
                     reason=f"Buying price dip: {price_gap:.2%} deviation",
                     confidence=Decimal("0.7"),
+                    strategy_name=self.name,
+                    created_at=created_at
+                ))
+
+            else:
+                reason = (
+                    f"Price spike of {price_gap:.2%} but no shares to sell"
+                    if price_gap > dev_threshold
+                    else f"Price {price_gap:+.2%} from its 5-day average, "
+                         f"within ±{dev_threshold:.0%}"
+                )
+                signals.append(Signal(
+                    symbol=symbol,
+                    action=SignalAction.HOLD,
+                    quantity=Decimal("0"),
+                    price=latest_bar.close,
+                    reason=reason,
+                    confidence=Decimal("0"),
                     strategy_name=self.name,
                     created_at=created_at
                 ))

@@ -437,6 +437,7 @@ def getTopGainers(limit: int = 5, min_price: float = 4.0):
             if price >= min_price:
                 valid.append({
                     "ticker": q['symbol'],
+                    "name": q.get('longName') or q.get('shortName'),
                     "price": round_2_decimals(price),
                     "change": round_2_decimals(q.get('regularMarketChange') or 0),
                     "changePercent": round_2_decimals(q.get('regularMarketChangePercent') or 0),
@@ -464,6 +465,7 @@ def getTopLosers(limit: int = 5, min_price: float = 4.0):
             if price >= min_price:
                 valid.append({
                     "ticker": q['symbol'],
+                    "name": q.get('longName') or q.get('shortName'),
                     "price": round_2_decimals(price),
                     "change": round_2_decimals(q.get('regularMarketChange') or 0),
                     "changePercent": round_2_decimals(q.get('regularMarketChangePercent') or 0),
@@ -491,6 +493,7 @@ def getMostActive(limit: int = 5, min_price: float = 4.0):
             if price >= min_price:
                 valid.append({
                     "ticker": q['symbol'],
+                    "name": q.get('longName') or q.get('shortName'),
                     "price": round_2_decimals(price),
                     "change": round_2_decimals(q.get('regularMarketChange') or 0),
                     "changePercent": round_2_decimals(q.get('regularMarketChangePercent') or 0),

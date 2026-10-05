@@ -6,7 +6,8 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
-import src.routes.simulator as simulator_routes
+import src.trading_engine.services.history as history_module
+import src.trading_engine.services.pricing as pricing_module
 import src.trading_engine.tasks.daily_pipeline as pipeline_module
 from src.core.config import settings
 from src.core.database import get_db
@@ -27,11 +28,11 @@ def client(db, monkeypatch):
         with db.session() as session:
             yield session
 
-    class _NoBackfill:
-        def delay(self, ticker):
-            pass
+    class _Yahoo:  # bars are seeded by the tests instead of downloaded
+        def fetch_daily_bars_range(self, symbols, start_day, end_day):
+            return []
 
-    class _Pricing:  # bars are seeded below instead of downloaded
+    class _Pricing:
         def __init__(self, **_):
             pass
 
@@ -39,7 +40,8 @@ def client(db, monkeypatch):
             return len(symbols)
 
     db.add(Users(user_id=1, name="u", email="u@x", password="p", is_active=True))
-    monkeypatch.setattr(simulator_routes, "backfill_ticker_history", _NoBackfill())
+    monkeypatch.setattr(pricing_module, "YahooPriceProvider", _Yahoo)
+    monkeypatch.setattr(history_module, "last_completed_trading_day", lambda: SIGNAL_DAY)
     monkeypatch.setattr(pipeline_module, "PricingService", _Pricing)
     monkeypatch.setattr(settings, "sim_fee_per_trade", Decimal("0"))
     monkeypatch.setattr(settings, "sim_slippage_bps", Decimal("0"))
@@ -101,3 +103,26 @@ def test_simulator_trades_with_its_strategy_settings(db, client, monkeypatch) ->
     [position] = summary["positions"]
     assert (position["ticker"], Decimal(str(position["shares"]))) == ("AAPL", Decimal("5"))
     assert Decimal(str(summary["simulator"]["cash_balance"])) == Decimal("9525")
+    # Day 2's close was back near its average: the latest decision says why it held.
+    [decision] = summary["decisions"]
+    assert (decision["ticker"], decision["action"]) == ("AAPL", "hold")
+    assert "within" in decision["reason"]
+
+
+def test_adding_stock_without_enough_history_explains_why(db, client) -> None:
+    _seed_prices(db)  # 5 trading days of AAPL
+    sim_id = client.post(
+        "/api/simulator", json={"name": "Bot", "starting_cash": 10000}
+    ).json()["simulator_id"]
+    client.patch(f"/api/simulator/{sim_id}/settings", json={"strategy_name": "sma_50_200_crossover"})
+
+    response = client.post(
+        f"/api/simulator/{sim_id}/tracked-stocks", json={"ticker": "AAPL", "target_allocation": 10}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Not enough price history: SMA 50/200 (Golden Cross) needs 201 trading days, "
+        "but AAPL has 5. Pick a shorter-term strategy or a smaller window."
+    )
+    assert client.get(f"/api/simulator/{sim_id}").json()["tracked_stocks"] == []
