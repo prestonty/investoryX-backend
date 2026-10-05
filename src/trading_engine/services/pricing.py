@@ -22,7 +22,7 @@ from pandas.tseries.holiday import (
     nearest_workday,
     sunday_to_monday,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from src.core.database import SessionLocal
@@ -96,6 +96,29 @@ def get_all_enabled_simulator_tickers(simulator_id: int | None = None) -> list[s
             if ticker and ticker.strip()
         }
         return sorted(tickers)
+    finally:
+        session.close()
+
+
+def has_price_history(symbol: str, start_day: date, end_day: date) -> bool:
+    """True if stored bars for symbol already span start_day..end_day (a week's slack each end).
+
+    The daily pipeline fills in every day between, so the two ends are enough to check.
+    """
+    slack = timedelta(days=7)
+    session = SessionLocal()
+    try:
+        stmt = (
+            select(func.min(PriceBarModel.day), func.max(PriceBarModel.day))
+            .where(PriceBarModel.symbol == symbol)
+            .where(PriceBarModel.source == "yfinance")
+        )
+        first_day, last_day = session.execute(stmt).one()
+        return (
+            first_day is not None
+            and first_day <= start_day + slack
+            and last_day >= end_day - slack
+        )
     finally:
         session.close()
 

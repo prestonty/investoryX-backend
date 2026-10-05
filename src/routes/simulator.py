@@ -50,6 +50,7 @@ from src.trading_engine.strategies.catalog import (
     params_to_store,
 )
 from src.trading_engine.tasks.daily_pipeline import MissingPriceDataError, run_pipeline
+from src.trading_engine.tasks.fetch_prices import backfill_ticker_history
 
 
 router = APIRouter(prefix="/api/simulator", tags=["simulator"])
@@ -232,7 +233,17 @@ def add_tracked_stock(
             status_code=400, detail="Tracked stock already exists"
         )
     db.refresh(tracked)
+    _queue_history_backfill(tracked.ticker)
     return tracked
+
+
+def _queue_history_backfill(ticker: str) -> None:
+    """Fetch the ticker's price history in the background so strategies can use it now."""
+    try:
+        backfill_ticker_history.delay(ticker)
+    except Exception:
+        # The stock is saved either way; the daily pipeline still adds a bar per day.
+        logger.exception("Failed to queue price history backfill for %s", ticker)
 
 
 @router.get("/{simulator_id}", response_model=SimulatorSummaryResponse)
