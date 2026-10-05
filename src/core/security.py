@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 from passlib.context import CryptContext
 from jose import JWTError, jwt
@@ -30,6 +32,7 @@ ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 EMAIL_TOKEN_EXPIRE_MINUTES = int(os.getenv("EMAIL_TOKEN_EXPIRE_MINUTES", "1440"))  # 24 hours by default
+PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = int(os.getenv("PASSWORD_RESET_TOKEN_EXPIRE_MINUTES", "30"))
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token", auto_error=False)
@@ -39,6 +42,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token", auto_error=False
 TOKEN_TYPE_ACCESS = "access"
 TOKEN_TYPE_REFRESH = "refresh"
 TOKEN_TYPE_VERIFY_EMAIL = "verify_email"
+TOKEN_TYPE_RESET_PASSWORD = "reset_password"
 
 # Verified against when the email doesn't exist, so login takes the same time
 # either way and response timing can't reveal which emails have accounts.
@@ -133,6 +137,36 @@ def verify_email_token(token: str) -> Optional[int]:
         return int(payload.get("sub")) if payload.get("sub") is not None else None
     except (TypeError, ValueError):
         return None
+
+def _password_fingerprint(hashed_password: str) -> str:
+    # Changes whenever the password does, so a reset link stops working once it
+    # has been used. An HMAC rather than the hash itself, since JWT payloads are
+    # readable by anyone holding the token.
+    return hmac.new(SECRET_KEY.encode(), hashed_password.encode(), hashlib.sha256).hexdigest()[:32]
+
+def create_password_reset_token(user: Users) -> str:
+    """Create a short-lived, single-use JWT for resetting a user's password."""
+    return create_access_token(
+        {"sub": str(user.user_id), "pwf": _password_fingerprint(user.password)},
+        timedelta(minutes=PASSWORD_RESET_TOKEN_EXPIRE_MINUTES),
+        token_type=TOKEN_TYPE_RESET_PASSWORD,
+    )
+
+def verify_password_reset_token(db: Session, token: str) -> Optional[Users]:
+    """Return the user a reset token belongs to, or None if it's invalid, expired or already used."""
+    payload = verify_token(token)
+    if payload is None or payload.get("type") != TOKEN_TYPE_RESET_PASSWORD:
+        return None
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        return None
+    user = get_user_by_id(db, user_id)
+    if user is None:
+        return None
+    if not hmac.compare_digest(str(payload.get("pwf", "")), _password_fingerprint(user.password)):
+        return None
+    return user
 
 async def get_current_user(
     request: Request,

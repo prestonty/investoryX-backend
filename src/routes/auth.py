@@ -1,33 +1,43 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from fastapi.responses import JSONResponse
 import os
-from src.services.email import sendSignUpEmail
+from src.services.email import sendPasswordResetEmail, sendSignUpEmail
 
 
+from src.core.config import settings
 from src.core.database import get_db
 from src.core.rate_limit import RateLimit
 from src.core.security import (
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
     authenticate_user,
+    create_password_reset_token,
     decode_refresh_token,
     get_password_hash,
     get_current_active_user,
+    get_user_by_email,
     create_email_verification_token,
     verify_email_token,
+    verify_password_reset_token,
     verify_token,
 )
 from src.core.sessions import (
     ACCESS_COOKIE,
     REFRESH_COOKIE,
     clear_auth_cookies,
+    revoke_all_sessions,
     revoke_session_for_token,
     rotate_session,
     set_auth_cookies,
     start_session,
 )
 from src.models.users import Users
+
+logger = logging.getLogger("investoryx.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
@@ -36,6 +46,8 @@ LOGIN_LIMIT = RateLimit("login", limit=10, window_seconds=60)
 REGISTER_LIMIT = RateLimit("register", limit=5, window_seconds=3600)
 VERIFY_EMAIL_LIMIT = RateLimit("verify_email", limit=20, window_seconds=60)
 REFRESH_LIMIT = RateLimit("refresh", limit=30, window_seconds=60)
+FORGOT_PASSWORD_LIMIT = RateLimit("forgot_password", limit=5, window_seconds=3600)
+RESET_PASSWORD_LIMIT = RateLimit("reset_password", limit=10, window_seconds=60)
 DISABLE_EMAIL_VERIFICATION = os.getenv("DISABLE_EMAIL_VERIFICATION", "false").lower() in ("1", "true", "yes")
 
 class Token(BaseModel):
@@ -43,6 +55,17 @@ class Token(BaseModel):
     token_type: str
 
 PASSWORD_MIN_LENGTH = 8
+
+
+def check_password_policy(value: str) -> str:
+    # Keep in sync with the frontend's src/lib/passwordPolicy.ts.
+    if len(value) < PASSWORD_MIN_LENGTH:
+        raise ValueError(f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
+    if not any(ch.isalpha() for ch in value):
+        raise ValueError("Password must contain at least one letter")
+    if not any(ch.isdigit() for ch in value):
+        raise ValueError("Password must contain at least one number")
+    return value
 
 
 class UserCreate(BaseModel):
@@ -54,14 +77,21 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def password_policy(cls, value: str) -> str:
-        # Keep in sync with the signup form's checks in the frontend.
-        if len(value) < PASSWORD_MIN_LENGTH:
-            raise ValueError(f"Password must be at least {PASSWORD_MIN_LENGTH} characters")
-        if not any(ch.isalpha() for ch in value):
-            raise ValueError("Password must contain at least one letter")
-        if not any(ch.isdigit() for ch in value):
-            raise ValueError("Password must contain at least one number")
-        return value
+        return check_password_policy(value)
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_policy(cls, value: str) -> str:
+        return check_password_policy(value)
 
 class UserResponse(BaseModel):
     user_id: int
@@ -220,5 +250,62 @@ def logout(request: Request, db: Session = Depends(get_db)):
     revoke_session_for_token(db, payload, reason="logout")
 
     response = JSONResponse(content={"message": "Logged out successfully"})
+    clear_auth_cookies(response)
+    return response
+
+
+FORGOT_PASSWORD_MESSAGE = "If an account exists for that email, we've sent a link to reset your password."
+
+
+def _send_password_reset_email(email: str, name: str, reset_url: str) -> None:
+    try:
+        sendPasswordResetEmail(email, name, reset_url, PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
+    except Exception:
+        logger.exception("Failed to send password reset email")
+
+
+@router.post("/forgot-password", dependencies=[Depends(FORGOT_PASSWORD_LIMIT)])
+def forgot_password(
+    body: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Email a password reset link.
+
+    Always returns the same message, and sends the email after responding, so
+    neither the response nor its timing reveals which emails have accounts.
+    """
+    user = get_user_by_email(db, body.email.strip())
+    if user is not None:
+        token = create_password_reset_token(user)
+        frontend_url = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000")
+        reset_url = f"{frontend_url}/reset-password?token={token}"
+        if settings.dev_mode:
+            # Lets the flow be tested locally without a working email setup.
+            logger.warning("DEV_MODE password reset link for user %s: %s", user.user_id, reset_url)
+        background_tasks.add_task(_send_password_reset_email, user.email, user.name, reset_url)
+
+    return {"message": FORGOT_PASSWORD_MESSAGE}
+
+
+@router.post("/reset-password", dependencies=[Depends(RESET_PASSWORD_LIMIT)])
+def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Set a new password using an emailed reset token, and log out every session."""
+    user = verify_password_reset_token(db, body.token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid or has expired. Please request a new one.",
+        )
+
+    user.password = get_password_hash(body.password)
+    # Opening the emailed link proves they own the address.
+    user.is_active = True
+    db.add(user)
+    db.commit()
+
+    revoke_all_sessions(db, user.user_id, reason="password_reset")
+
+    response = JSONResponse(content={"message": "Your password has been reset. You can now log in."})
     clear_auth_cookies(response)
     return response

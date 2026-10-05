@@ -164,6 +164,15 @@ def revoke_session_for_token(db: Session, token_payload: dict | None, reason: st
         db.commit()
 
 
+def revoke_all_sessions(db: Session, user_id: int, reason: str) -> None:
+    """Revoke every active session a user has (e.g. after a password reset)."""
+    now = _now()
+    db.query(UserSession).filter(
+        UserSession.user_id == user_id, UserSession.revoked_at.is_(None)
+    ).update({"revoked_at": now, "revoked_reason": reason}, synchronize_session=False)
+    db.commit()
+
+
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
     common = {
         "domain": settings.cookie_domain,

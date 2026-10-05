@@ -61,3 +61,30 @@ def sendWelcomeEmail(email: str, first_name: str, dashboard_url: str):
         resend.Emails.send(params)
     except Exception as e:
         raise RuntimeError(f"Error sending welcome email: {e}")
+
+
+def sendPasswordResetEmail(
+    email: str,
+    first_name: str,
+    reset_url: str,
+    link_ttl_minutes: int = 30,
+):
+    """Send a password reset email using the reset_password.html template"""
+    html_content = load_template("reset_password")
+
+    html_content = html_content.replace("{first_name}", first_name)
+    html_content = html_content.replace("{reset_url}", reset_url)
+    html_content = html_content.replace("{link_ttl_minutes}", str(link_ttl_minutes))
+    html_content = html_content.replace("{year}", str(datetime.now().year))
+
+    params: resend.Emails.SendParams = {
+        "from": "InvestoryX <noreply@investoryx.ca>",
+        "to": [email],
+        "subject": "Reset your password - InvestoryX",
+        "html": html_content,
+    }
+
+    try:
+        resend.Emails.send(params)
+    except Exception as e:
+        raise RuntimeError(f"Error sending password reset email: {e}")
