@@ -72,8 +72,9 @@ def authenticate_user(db: Session, email: str, password: str) -> Optional[Users]
         return None
     if not verify_password(password, user.password):
         return None
-    if not user.is_active:
-        return None  # Prevent inactive users from logging in
+    # Unverified (inactive) users are returned so the login route can tell them
+    # to verify their email; every other endpoint rejects them via
+    # get_current_active_user.
     return user
 
 def create_access_token(

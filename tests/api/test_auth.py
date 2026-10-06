@@ -104,3 +104,29 @@ def test_reset_password_rejects_other_token_types(client, db) -> None:
     token = create_email_verification_token(1)
     response = client.post("/api/auth/reset-password", json={"token": token, "password": "new-password2"})
     assert response.status_code == 400
+
+
+def test_login_errors_carry_stable_codes(client, db, monkeypatch) -> None:
+    monkeypatch.setattr(auth_routes, "DISABLE_EMAIL_VERIFICATION", False)
+    db.add(Users(user_id=1, name="u", email="u@example.com",
+                 password=get_password_hash(PASSWORD), is_active=False))
+
+    wrong = client.post("/api/auth/token", data={"username": "u@example.com", "password": "nope"})
+    assert wrong.status_code == 401
+    assert wrong.json()["code"] == "invalid_credentials"
+
+    unverified = client.post("/api/auth/token", data={"username": "u@example.com", "password": PASSWORD})
+    assert unverified.status_code == 403
+    assert unverified.json()["code"] == "email_not_verified"
+
+
+def test_register_existing_email_has_code(client, db, monkeypatch) -> None:
+    monkeypatch.setattr(auth_routes, "sendSignUpEmail", lambda *args: None)
+    db.add(Users(user_id=1, name="u", email="u@example.com",
+                 password=get_password_hash(PASSWORD), is_active=True))
+
+    response = client.post(
+        "/api/auth/register", json={"Name": "n", "email": "u@example.com", "password": "abcdefg1"}
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Email already registered", "code": "email_taken"}
