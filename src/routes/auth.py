@@ -11,6 +11,7 @@ from src.services.email import sendPasswordResetEmail, sendSignUpEmail
 
 from src.core.config import settings
 from src.core.database import get_db
+from src.core.errors import AppError, ErrorCode
 from src.core.rate_limit import RateLimit
 from src.core.security import (
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES,
@@ -118,8 +119,9 @@ async def login_for_access_token(
     # (also for unknown emails) prevent user enumeration
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
-        raise HTTPException(
+        raise AppError(
             status_code=status.HTTP_401_UNAUTHORIZED,
+            code=ErrorCode.INVALID_CREDENTIALS,
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
@@ -127,8 +129,9 @@ async def login_for_access_token(
     # Ensure user is active (email verified) unless verification is disabled
     if not user.is_active and not DISABLE_EMAIL_VERIFICATION:
         # Don't resend verification email automatically - user should use the one from registration
-        raise HTTPException(
+        raise AppError(
             status_code=status.HTTP_403_FORBIDDEN,
+            code=ErrorCode.EMAIL_NOT_VERIFIED,
             detail="Email not verified. Please check your email for the verification link from when you registered.",
         )
 
@@ -144,8 +147,9 @@ async def register_user(user: UserCreate, db: Session = Depends(get_db)):
         # Check if user already exists
         existing_user = db.query(Users).filter(Users.email == user.email).first()
         if existing_user:
-            raise HTTPException(
+            raise AppError(
                 status_code=status.HTTP_400_BAD_REQUEST,
+                code=ErrorCode.EMAIL_TAKEN,
                 detail="Email already registered",
             )
 
