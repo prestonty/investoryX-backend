@@ -191,7 +191,9 @@ def _fetchQuotes(tickers):
             def fetch_one():
                 info = data.tickers[t].fast_info
                 last_price = info.last_price
-                prev_close = info.previous_close
+                # previous_close here is derived from recent bars and can be
+                # ~today's price; regular_market_previous_close matches info['previousClose']
+                prev_close = info.regular_market_previous_close
                 pct = ((last_price - prev_close) / prev_close) * 100 if prev_close else None
                 return {
                     "stockPrice": last_price,
