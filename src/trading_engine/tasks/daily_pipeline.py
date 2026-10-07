@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 
 from celery import shared_task
 
 from src.core.config import settings
 from src.trading_engine.services.evaluation import EvaluationService
 from src.trading_engine.services.pricing import (
+    MARKET_CLOSE,
+    MARKET_TZ,
     _is_trading_day,
     get_all_enabled_simulator_tickers,
     last_completed_trading_day,
@@ -16,6 +18,7 @@ from src.trading_engine.services.pricing import (
     YahooPriceProvider,
 )
 from src.trading_engine.tasks.execute_paper_trades import execute_signals
+from src.trading_engine.tasks.fill_queued_orders import fill_queued_orders
 from src.trading_engine.tasks.reconcile_portfolios import reconcile_portfolios
 
 
@@ -52,6 +55,12 @@ def run_pipeline(day: date | None = None, simulator_id: int | None = None) -> di
                 f"No price bars fetched for {len(tickers)} tickers on {target_day.isoformat()}"
             )
 
+    # Manual orders queued for this day's open normally fill during the session;
+    # this catches any the intraday task missed.
+    queued_orders = fill_queued_orders(
+        simulator_id=simulator_id,
+        now=datetime.combine(target_day, MARKET_CLOSE, tzinfo=MARKET_TZ),
+    )
     execution = execute_signals(
         simulator_id=simulator_id,
         slippage_bps=settings.sim_slippage_bps,
@@ -66,6 +75,7 @@ def run_pipeline(day: date | None = None, simulator_id: int | None = None) -> di
         "day": target_day.isoformat(),
         "prices_fetched": prices_fetched,
         "signals": evaluation.to_dict(),
+        "queued_orders": queued_orders,
         "trades_executed": asdict(execution),
         "portfolios_reconciled": reconciliation,
     }

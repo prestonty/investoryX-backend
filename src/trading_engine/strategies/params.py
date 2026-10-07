@@ -55,6 +55,12 @@ class PairsTradingParams(StrategyParams):
         return self.window
 
 
+class ManualParams(StrategyParams):
+    def history_bars(self) -> int:
+        # Nothing is evaluated, so no history is required.
+        return 0
+
+
 class AuctionLiquidityParams(StrategyParams):
     deviation_threshold: Decimal = Field(
         Decimal("0.02"), gt=0, lt=1, title="Deviation threshold (fraction)"

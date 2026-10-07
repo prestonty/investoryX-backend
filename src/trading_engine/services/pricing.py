@@ -7,6 +7,7 @@ from functools import lru_cache
 from typing import Protocol
 from zoneinfo import ZoneInfo
 import logging
+import math
 
 import pandas as pd
 import yfinance as yf
@@ -430,6 +431,7 @@ def _normalize_symbols(symbols: list[str]) -> list[str]:
 
 
 MARKET_TZ = ZoneInfo("America/New_York")
+MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 0)
 
 
@@ -469,6 +471,20 @@ def previous_trading_day(day: date) -> date:
     return day
 
 
+def next_trading_day(day: date) -> date:
+    """The trading day after `day` (skipping weekends and NYSE holidays)."""
+    day += timedelta(days=1)
+    while not _is_trading_day(day):
+        day += timedelta(days=1)
+    return day
+
+
+def market_is_open(now: datetime | None = None) -> bool:
+    """Regular NYSE session (9:30-16:00 ET on trading days)."""
+    now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
+    return _is_trading_day(now_et.date()) and MARKET_OPEN <= now_et.time() < MARKET_CLOSE
+
+
 def last_completed_trading_day(now: datetime | None = None) -> date:
     """Most recent trading day whose regular session has closed, in US/Eastern time."""
     now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
@@ -478,4 +494,39 @@ def last_completed_trading_day(now: datetime | None = None) -> date:
     while not _is_trading_day(day):
         day -= timedelta(days=1)
     return day
+
+
+def last_opened_trading_day(now: datetime | None = None) -> date:
+    """Most recent trading day whose regular session has opened, in US/Eastern time."""
+    now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
+    day = now_et.date()
+    if now_et.time() < MARKET_OPEN:
+        day -= timedelta(days=1)
+    while not _is_trading_day(day):
+        day -= timedelta(days=1)
+    return day
+
+
+def next_open_day(now: datetime | None = None) -> date:
+    """Trading day whose open fills an order placed at `now` while the market is closed."""
+    now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
+    day = now_et.date()
+    if _is_trading_day(day) and now_et.time() < MARKET_OPEN:
+        return day
+    return next_trading_day(day)
+
+
+def fetch_last_price(symbol: str) -> Decimal | None:
+    """Latest regular-session price from Yahoo, uncached; None if Yahoo has none.
+
+    While the market is closed this is the last close.
+    """
+    try:
+        price = yf.Ticker(symbol).fast_info.last_price
+    except Exception as exc:
+        logger.warning("Last price lookup failed for %s: %s", symbol, exc)
+        return None
+    if price is None or not math.isfinite(price) or price <= 0:
+        return None
+    return Decimal(str(round(price, 4)))
 

@@ -21,6 +21,7 @@ from src.core.database import Base
 from src.models.price_bar import PriceBar
 from src.models.simulator import Simulator
 from src.models.simulator_cash_ledger import SimulatorCashLedger
+from src.models.simulator_order import SimulatorOrder
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_trade import SimulatorTrade
@@ -35,6 +36,7 @@ _TABLES = [
     SimulatorTrackedStock.__table__,
     SimulatorSignal.__table__,
     SimulatorTrade.__table__,
+    SimulatorOrder.__table__,
     SimulatorCashLedger.__table__,
     SimulatorPosition.__table__,
     PriceBar.__table__,
@@ -76,6 +78,7 @@ _SESSION_MODULES = [
     "src.trading_engine.services.backtest",
     "src.trading_engine.services.pricing",
     "src.trading_engine.tasks.execute_paper_trades",
+    "src.trading_engine.tasks.fill_queued_orders",
     "src.trading_engine.tasks.reconcile_portfolios",
     "src.trading_engine.tasks.sync_listings",
 ]

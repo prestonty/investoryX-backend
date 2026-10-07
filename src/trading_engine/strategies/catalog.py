@@ -14,9 +14,11 @@ from src.trading_engine.services.strategy import (
     StrategyRegistry,
 )
 
+from .manual import ManualStrategy
 from .moving_averages import SimpleMovingAverageStrategy, Sma50x200CrossoverStrategy
 from .params import (
     AuctionLiquidityParams,
+    ManualParams,
     PairsTradingParams,
     Sma50x200Params,
     SmaCrossoverParams,
@@ -24,6 +26,8 @@ from .params import (
 )
 
 DEFAULT_STRATEGY_NAME = SimpleMovingAverageStrategy.name
+# Simulators on this "strategy" are traded by hand and never evaluated.
+MANUAL_STRATEGY_NAME = ManualStrategy.name
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ CATALOG: dict[str, StrategyEntry] = {
         StrategyEntry(
             AuctionLiquidityStrategy(), "Auction Liquidity Provider", AuctionLiquidityParams
         ),
+        StrategyEntry(ManualStrategy(), "Manual trading", ManualParams),
     )
 }
 

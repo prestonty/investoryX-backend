@@ -88,6 +88,26 @@ size orders with the same `plan_fill()` and `ExecutionRules` as live execution.
 - Business rule:
   - If stored cash/positions drift from replayed trades, reconciliation corrects drift and restores consistency.
 
+## Manual Trading
+- A simulator whose strategy is `manual` (`strategies/manual.py`) is traded by hand.
+  Evaluation skips it, so the bot never trades it; switching the strategy back and
+  forth is how a simulator moves between manual and automated trading.
+- `services/manual_orders.py` handles market orders (whole shares):
+  - Market open: fills immediately at Yahoo's latest price.
+  - Market closed: saved to `simulator_orders` and filled at the next trading day's
+    open by `tasks/fill_queued_orders.py` (every 15 minutes during the session, and
+    again in the daily pipeline as a fallback). Pending buys set aside cash, and
+    pending sells set aside shares, so queued orders can't overcommit.
+  - Every fill goes through `plan_fill()`, so fees and slippage match the bot. A
+    risk limit rejects the order instead of shrinking it, and the message says how
+    many shares fit.
+- Trades are tagged `source='manual'` and replayed by reconciliation like live trades.
+- Switching to manual cancels the strategy's pending signals; switching away cancels
+  pending manual orders.
+- API: `POST /api/simulator/{id}/orders/quote` prices an order for the confirm step,
+  `POST /api/simulator/{id}/orders` places it, and `DELETE /api/simulator/{id}/orders/{order_id}`
+  cancels a queued one.
+
 ## Folders
 - `tasks`: Celery task definitions (price fetch, strategy eval, execution, reconciliation)
 - `strategies`: Strategy interfaces and implementations

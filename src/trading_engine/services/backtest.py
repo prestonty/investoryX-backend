@@ -26,13 +26,12 @@ from .execution import (
     portfolio_equity,
 )
 from .portfolio import PortfolioSnapshot, Position
-from .pricing import MARKET_TZ, PriceBar, YahooPriceProvider, _is_trading_day
+from .pricing import MARKET_OPEN, MARKET_TZ, PriceBar, YahooPriceProvider, _is_trading_day
 from .strategy import Signal, StrategyService
 
 logger = logging.getLogger("investoryx.trading_engine.backtest")
 
 BACKTEST_SOURCE = "backtest"
-MARKET_OPEN = time(9, 30)
 
 
 @dataclass

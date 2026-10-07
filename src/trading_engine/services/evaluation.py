@@ -15,6 +15,7 @@ from src.models.simulator_signal import SimulatorSignal
 from src.models.simulator_tracked_stock import SimulatorTrackedStock
 from src.trading_engine.strategies.catalog import (
     DEFAULT_STRATEGY_NAME,
+    MANUAL_STRATEGY_NAME,
     build_registry,
     effective_params,
     history_bars,
@@ -229,6 +230,8 @@ class EvaluationService:
                 )
                 .where(SimulatorTrackedStock.enabled.is_(True))
                 .where(Simulator.status != SIMULATOR_STATUS_PAUSED)
+                # Manual simulators are traded by hand; the bot never decides for them.
+                .where(Simulator.strategy_name != MANUAL_STRATEGY_NAME)
                 .distinct()
                 .order_by(Simulator.simulator_id)
             )

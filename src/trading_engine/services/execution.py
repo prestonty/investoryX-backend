@@ -25,6 +25,7 @@ logger = logging.getLogger("investoryx.trading_engine.execution")
 LIVE_SOURCE = "live"
 # How far back to look for a price to value holdings that have no bar on the trade day.
 MARK_LOOKBACK_DAYS = 10
+PRICE_STEP = Decimal("0.0001")
 
 
 class SignalExecutionStatus(str, Enum):
@@ -172,8 +173,12 @@ def estimate_fill_price(
         return market_price
     bps = slippage_bps / Decimal("10000")
     if side is SignalAction.BUY:
-        return market_price * (Decimal("1") + bps)
-    return market_price * (Decimal("1") - bps)
+        price = market_price * (Decimal("1") + bps)
+    else:
+        price = market_price * (Decimal("1") - bps)
+    # Trades store 4 decimal places; rounding here keeps the cash moved by a
+    # fill equal to what replaying the stored trade gives.
+    return price.quantize(PRICE_STEP)
 
 
 def portfolio_equity(

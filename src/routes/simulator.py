@@ -8,6 +8,7 @@ from typing import List
 from decimal import Decimal
 from datetime import date, datetime, timedelta, timezone
 
+from src.core.config import settings
 from src.core.database import get_db
 from src.core.rate_limit import RateLimit
 from src.core.security import get_current_active_user
@@ -17,6 +18,7 @@ from src.models.simulator_tracked_stock import SimulatorTrackedStock
 from src.models.simulator_position import SimulatorPosition
 from src.models.simulator_trade import SimulatorTrade
 from src.models.simulator_cash_ledger import SimulatorCashLedger
+from src.models.simulator_order import SimulatorOrder
 from src.models.simulator_signal import SimulatorSignal
 from src.schemas.simulator import (
     SimulatorCreate,
@@ -30,6 +32,10 @@ from src.schemas.simulator import (
     SimulatorTradeResponse,
     SimulatorCashLedgerResponse,
     SimulatorDecisionResponse,
+    SimulatorOrderResponse,
+    ManualOrderRequest,
+    ManualOrderQuoteResponse,
+    ManualOrderPlacedResponse,
     MessageResponse,
     SimulatorRunResponse,
     SimulatorRunRequest,
@@ -49,8 +55,15 @@ from src.trading_engine.services.history import (
     InsufficientPriceHistoryError,
     ensure_price_history,
 )
+from src.trading_engine.services.manual_orders import (
+    ManualOrderService,
+    OrderQuote,
+    OrderRejected,
+    switch_trading_mode,
+)
 from src.trading_engine.strategies.catalog import (
     DEFAULT_STRATEGY_NAME,
+    MANUAL_STRATEGY_NAME,
     InvalidStrategyParams,
     effective_params,
     params_to_store,
@@ -64,6 +77,10 @@ logger = logging.getLogger("investoryx.simulator")
 # Each run fetches prices from Yahoo; each backtest queues heavy worker jobs.
 RUN_LIMIT = RateLimit("simulator_run", limit=10, window_seconds=60)
 BACKTEST_LIMIT = RateLimit("simulator_backtest", limit=5, window_seconds=60)
+# Quoting and placing an order each fetch a live price from Yahoo.
+ORDER_LIMIT = RateLimit("simulator_order", limit=60, window_seconds=60)
+# Orders listed in a summary: every pending one plus recent history.
+SUMMARY_ORDER_LIMIT = 50
 
 
 def get_user_simulator(
@@ -140,7 +157,9 @@ def update_simulator_settings(
     strategy_update = _resolve_strategy_update(simulator, payload)
     if strategy_update is not None:
         _require_price_history(db, _enabled_tickers(db, simulator_id), *strategy_update)
+        old_strategy = simulator.strategy_name
         simulator.strategy_name, simulator.strategy_params = strategy_update
+        switch_trading_mode(db, simulator_id, old_strategy, simulator.strategy_name)
 
     if "frequency" in payload.model_fields_set and payload.frequency is not None:
         simulator.frequency = payload.frequency
@@ -335,6 +354,13 @@ def get_simulator_summary(
         .order_by(SimulatorCashLedger.created_at.desc())
         .all()
     )
+    orders = (
+        db.query(SimulatorOrder)
+        .filter(SimulatorOrder.simulator_id == simulator_id)
+        .order_by(SimulatorOrder.created_at.desc(), SimulatorOrder.order_id.desc())
+        .limit(SUMMARY_ORDER_LIMIT)
+        .all()
+    )
 
     return SimulatorSummaryResponse(
         simulator=SimulatorResponse.model_validate(simulator),
@@ -358,6 +384,7 @@ def get_simulator_summary(
             SimulatorDecisionResponse.model_validate(signal)
             for signal in _latest_decisions(db, simulator_id, [t.ticker for t in tracked_stocks])
         ],
+        orders=[SimulatorOrderResponse.model_validate(order) for order in orders],
     )
 
 
@@ -398,6 +425,16 @@ def run_simulator(
 
     frequency = payload.frequency or simulator.frequency
     simulator.frequency = frequency
+
+    if simulator.strategy_name == MANUAL_STRATEGY_NAME:
+        db.commit()
+        db.refresh(simulator)
+        return SimulatorRunResponse(
+            message="Manual trading: place orders yourself; there is no strategy to run",
+            trades_executed=0,
+            cash_balance=Decimal(str(simulator.cash_balance)),
+            frequency=frequency,
+        )
 
     tracked_stocks = (
         db.query(SimulatorTrackedStock)
@@ -492,6 +529,122 @@ def _count_queued_orders(db: Session, simulator_id: int) -> int:
     )
 
 
+@router.post(
+    "/{simulator_id}/orders/quote",
+    response_model=ManualOrderQuoteResponse,
+    dependencies=[Depends(ORDER_LIMIT)],
+)
+def quote_manual_order(
+    simulator_id: int,
+    payload: ManualOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user),
+):
+    """Price a market order without placing it, for the confirmation step."""
+    simulator = get_user_simulator(db, simulator_id, current_user.user_id)
+    if not simulator:
+        raise HTTPException(status_code=404, detail="Simulator not found")
+
+    try:
+        quote = ManualOrderService().quote(
+            db, simulator, payload.ticker, SignalAction(payload.side), Decimal(payload.shares)
+        )
+    except OrderRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _quote_response(quote)
+
+
+@router.post(
+    "/{simulator_id}/orders",
+    response_model=ManualOrderPlacedResponse,
+    dependencies=[Depends(ORDER_LIMIT)],
+)
+def place_manual_order(
+    simulator_id: int,
+    payload: ManualOrderRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user),
+):
+    """Buy or sell at market: fills now while the market is open, else at the next open."""
+    simulator = get_user_simulator(db, simulator_id, current_user.user_id)
+    if not simulator:
+        raise HTTPException(status_code=404, detail="Simulator not found")
+
+    try:
+        placed = ManualOrderService().place(
+            db, simulator_id, payload.ticker, SignalAction(payload.side), Decimal(payload.shares)
+        )
+        db.commit()
+    except OrderRejected as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.refresh(simulator)
+
+    quote = placed.quote
+    shares = f"{quote.shares.normalize():f}"
+    if placed.trade is not None:
+        verb = "Bought" if quote.side is SignalAction.BUY else "Sold"
+        price = Decimal(str(placed.trade.price))
+        message = f"{verb} {shares} {quote.ticker} at ${price:,.2f}"
+    else:
+        day = quote.fill_day
+        message = (
+            f"Market closed: your order to {quote.side.value} {shares} {quote.ticker} "
+            f"fills at the open on {day:%a, %b} {day.day}"
+        )
+    return ManualOrderPlacedResponse(
+        status="filled" if placed.trade is not None else "queued",
+        message=message,
+        quote=_quote_response(quote),
+        trade=SimulatorTradeResponse.model_validate(placed.trade) if placed.trade else None,
+        order=SimulatorOrderResponse.model_validate(placed.order) if placed.order else None,
+        cash_balance=Decimal(str(simulator.cash_balance)),
+    )
+
+
+@router.delete(
+    "/{simulator_id}/orders/{order_id}",
+    response_model=SimulatorOrderResponse,
+)
+def cancel_manual_order(
+    simulator_id: int,
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_active_user),
+):
+    """Cancel an order still waiting for the next open."""
+    simulator = get_user_simulator(db, simulator_id, current_user.user_id)
+    if not simulator:
+        raise HTTPException(status_code=404, detail="Simulator not found")
+
+    try:
+        order = ManualOrderService().cancel(db, simulator_id, order_id)
+        db.commit()
+    except LookupError:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Order not found")
+    except OrderRejected as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.refresh(order)
+    return SimulatorOrderResponse.model_validate(order)
+
+
+def _quote_response(quote: OrderQuote) -> ManualOrderQuoteResponse:
+    return ManualOrderQuoteResponse(
+        ticker=quote.ticker,
+        side=quote.side.value,
+        shares=quote.shares,
+        market_price=quote.market_price,
+        estimated_price=quote.estimated_price,
+        fee=quote.fee,
+        estimated_total=quote.estimated_total,
+        slippage_bps=settings.sim_slippage_bps,
+        fills_now=quote.fills_now,
+        fill_day=quote.fill_day,
+    )
+
+
 @router.delete("/{simulator_id}", response_model=MessageResponse)
 def delete_simulator(
     simulator_id: int,
@@ -504,6 +657,10 @@ def delete_simulator(
 
     # Delete all items associated with this simulator before deleting the simulator.
     # This keeps deletion reliable even if DB-level ON DELETE CASCADE is missing.
+    # Orders go before the trades they reference.
+    db.query(SimulatorOrder).filter(
+        SimulatorOrder.simulator_id == simulator_id
+    ).delete(synchronize_session=False)
     db.query(SimulatorTrackedStock).filter(
         SimulatorTrackedStock.simulator_id == simulator_id
     ).delete(synchronize_session=False)
@@ -574,6 +731,11 @@ def launch_backtest(
     simulator = get_user_simulator(db, simulator_id, current_user.user_id)
     if not simulator:
         raise HTTPException(status_code=404, detail="Simulator not found")
+    if simulator.strategy_name == MANUAL_STRATEGY_NAME:
+        raise HTTPException(
+            status_code=400,
+            detail="Manual trading has no strategy to backtest. Pick a strategy first.",
+        )
 
     today = date.today()
     if payload.start_date >= payload.end_date:

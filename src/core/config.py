@@ -21,9 +21,11 @@ class Settings:
     stock_search_limit: int = 200
     screener_cache_ttl: int = 300  # seconds
 
-    # Paper-trading execution costs, applied the same way by every trading path.
+    # Paper-trading execution costs, applied the same way by every trading path
+    # (strategy fills, backtests and manual orders). Slippage always works against
+    # the trader: buys fill above the market price, sells below. 5 bps = 0.05%.
     sim_fee_per_trade: Decimal = Decimal(os.getenv("SIM_FEE_PER_TRADE", "0"))
-    sim_slippage_bps: Decimal = Decimal(os.getenv("SIM_SLIPPAGE_BPS", "0"))
+    sim_slippage_bps: Decimal = Decimal(os.getenv("SIM_SLIPPAGE_BPS", "5"))
     # Largest notional value of a single paper buy; unset means no cap.
     sim_max_order_value: Decimal | None = (
         Decimal(os.environ["SIM_MAX_ORDER_VALUE"]) if os.getenv("SIM_MAX_ORDER_VALUE") else None

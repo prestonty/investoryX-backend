@@ -9,24 +9,16 @@ without Redis, calls simply go upstream.
 import functools
 import json
 import logging
-from datetime import datetime
 from typing import Any, Callable
 
 from src.core.redis_client import get_redis, mark_unavailable
-from src.trading_engine.services.pricing import MARKET_TZ, _is_trading_day
+from src.trading_engine.services.pricing import market_is_open
 
 logger = logging.getLogger("investoryx.cache")
 
 STALE_TTL_SECONDS = 24 * 60 * 60
 
 TTL = int | Callable[..., int]
-
-
-def market_is_open(now: datetime | None = None) -> bool:
-    """Regular NYSE session (9:30-16:00 ET on trading days)."""
-    now_et = (now or datetime.now(MARKET_TZ)).astimezone(MARKET_TZ)
-    minutes = now_et.hour * 60 + now_et.minute
-    return _is_trading_day(now_et.date()) and 9 * 60 + 30 <= minutes < 16 * 60
 
 
 def is_cacheable(value: Any) -> bool:

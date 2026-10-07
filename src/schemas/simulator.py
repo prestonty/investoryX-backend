@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, List, Optional, Literal
@@ -153,6 +154,29 @@ class SimulatorDecisionResponse(BaseModel):
         from_attributes = True
 
 
+class SimulatorOrderResponse(BaseModel):
+    """A manual order queued while the market was closed, and what became of it."""
+
+    order_id: int
+    simulator_id: int
+    ticker: str
+    side: str  # buy | sell
+    shares: Decimal
+    # Last price when the order was placed.
+    quote_price: Decimal
+    # Trading day whose opening price fills the order.
+    fill_day: date
+    # pending = waiting for fill_day's open; filled, rejected or cancelled after that.
+    status: str
+    error: Optional[str] = None
+    trade_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class SimulatorSummaryResponse(BaseModel):
     simulator: SimulatorResponse
     tracked_stocks: List[SimulatorTrackedStockResponse]
@@ -160,6 +184,51 @@ class SimulatorSummaryResponse(BaseModel):
     trades: List[SimulatorTradeResponse]
     cash_ledger: List[SimulatorCashLedgerResponse]
     decisions: List[SimulatorDecisionResponse] = []
+    # Recent manual orders queued for an open, newest first.
+    orders: List[SimulatorOrderResponse] = []
+
+
+class ManualOrderRequest(BaseModel):
+    ticker: str
+    side: Literal["buy", "sell"]
+    # Whole shares only.
+    shares: int = Field(gt=0, le=1_000_000)
+
+    @field_validator("ticker")
+    @classmethod
+    def _normalize_ticker(cls, value: str) -> str:
+        value = value.strip().upper()
+        if not re.fullmatch(r"[A-Z0-9.\-]{1,10}", value):
+            raise ValueError("Enter a ticker symbol")
+        return value
+
+
+class ManualOrderQuoteResponse(BaseModel):
+    """What a market order would do if placed now."""
+
+    ticker: str
+    side: Literal["buy", "sell"]
+    shares: Decimal
+    # Latest price; the last close while the market is closed.
+    market_price: Decimal
+    # market_price with slippage against the trader.
+    estimated_price: Decimal
+    fee: Decimal
+    # Cash paid for a buy, or received for a sell.
+    estimated_total: Decimal
+    slippage_bps: Decimal
+    # False while the market is closed: the order waits for fill_day's open.
+    fills_now: bool
+    fill_day: date
+
+
+class ManualOrderPlacedResponse(BaseModel):
+    status: Literal["filled", "queued"]
+    message: str
+    quote: ManualOrderQuoteResponse
+    trade: Optional[SimulatorTradeResponse] = None
+    order: Optional[SimulatorOrderResponse] = None
+    cash_balance: Decimal
 
 
 class MessageResponse(BaseModel):

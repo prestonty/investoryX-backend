@@ -8,9 +8,25 @@ Here's the link to [InvestoryX Frontend](https://github.com/prestonty/investoryX
 
 Watch video demo here: https://youtu.be/PdQUqJX_cCM
 
-## Docker Commands
+## Getting Started
 
-Start the full stack with one command:
+Everything runs in Docker: Postgres, Redis, migrations, the API and Celery. The
+only prerequisite is Docker (Docker Desktop on Windows/macOS), and every command
+in this README goes through it.
+
+### 1. Configure the Environment
+
+```bash
+cp .env.example .env
+```
+
+Fill in the secrets, including `ALPHAVANTAGE_API_KEY` (free at alphavantage.co),
+which downloads the stock list. Keep `DATABASE_URL` pointing at the `db` host as in
+the example; that's the Postgres container's name on Docker's network. The
+`POSTGRES_*` values create the database the first time it starts and must match
+the user, password and database name in `DATABASE_URL`.
+
+### 2. Start the Stack
 
 ```bash
 docker compose up --build
@@ -21,54 +37,78 @@ This starts:
 | Service           | What it does                                                      | Port   |
 | ----------------- | ----------------------------------------------------------------- | ------ |
 | `db`              | Postgres 16                                                       | `5433` |
-| `redis`           | Celery broker/result backend + stock data cache                   | `6379` |
+| `redis`           | Celery broker + stock data cache                                  | `6379` |
 | `migrate`         | One-shot: runs `alembic upgrade head`, seeds stocks if table empty | –      |
 | `backend`         | FastAPI (auto-reloads on code changes)                            | `8000` |
 | `celery-worker`   | Celery worker                                                     | –      |
 | `celery-beat`     | Celery Beat scheduler                                             | –      |
 | `redis-commander` | Web UI for inspecting Redis                                       | `8081` |
 
-`backend`, `celery-worker` and `celery-beat` wait for `migrate` to finish, so the
-schema is always up to date before the app starts. `migrate` exiting with code 0
-is expected.
+The API is at `http://localhost:8000`, with interactive docs at `/docs`.
 
-Your source code is mounted into the backend and Celery containers. The backend
-reloads automatically; Celery does not, so after editing tasks run:
+The frontend is not part of this stack. Run it from the frontend repo with `npm run dev`.
+
+### What Happens Behind the Scenes
+
+1. `db` and `redis` start, and Compose waits until both pass their health checks.
+2. `migrate` runs once: `alembic upgrade head` applies any migrations in
+   `alembic/versions/` that this database hasn't had yet, then the seed downloads
+   the US stock list from Alpha Vantage if the `stocks` table is empty. It then
+   exits with code 0, which is expected.
+3. `backend`, `celery-worker` and `celery-beat` start only after `migrate`
+   succeeds, so the schema is always current before any code touches it.
+4. `celery-beat` queues scheduled jobs (weekdays, US Eastern time) and `celery-worker` runs them:
+   - 7:00 AM: add newly listed tickers (e.g. IPOs) to `stocks`
+   - Every 15 minutes, 9:05 AM–3:50 PM: fill manual orders queued while the market was closed
+   - 4:30 PM: the trading pipeline (fetch prices, fill strategy orders at the
+     open, rebuild portfolios, evaluate strategies)
+
+Your code is mounted into the containers rather than copied, so edits apply
+without a rebuild. Uvicorn reloads on its own; Celery needs a restart (below).
+
+## Docker Commands
+
+```bash
+# First start, or after dependency changes
+docker compose up --build
+
+# Start in the background
+docker compose up -d --build
+
+# Stream backend logs
+docker compose logs -f backend
+```
+
+After editing Celery tasks or schedules, restart the Celery containers:
 
 ```bash
 docker compose restart celery-worker celery-beat
 ```
 
-The frontend is not part of this stack. Run it from the frontend repo with `npm run dev`.
-
-Start in the background:
+After pulling or writing a new migration while the stack is running, apply it with:
 
 ```bash
-docker compose up -d --build
+docker compose run --rm migrate
 ```
 
-Stream backend logs:
+Plain `alembic upgrade head` from your own terminal won't work against this stack:
+`DATABASE_URL` points at the `db` host, which only exists inside Docker's network.
+
+### Connecting to Postgres
+
+Docker's Postgres is published on `localhost:5433` (not 5432, so it doesn't clash
+with a Postgres installed on your machine). Point a database client there with the
+credentials from `.env`.
+
+### Stock Table Empty?
+
+The stock list fills itself (see above), but if the first seed failed, e.g. a bad
+`ALPHAVANTAGE_API_KEY` (check `docker compose logs migrate`), startup carries on with
+an empty table until the 7 AM sync. To fill it now:
 
 ```bash
-docker compose logs -f backend
+docker compose exec backend python -m src.services.seed
 ```
-
-### Postgres Ports (Local vs Docker)
-
-By default, Docker maps Postgres to `localhost:5432`. If you also run a local
-postgres instance, change the port mapping to avoid conflicts.
-
-In `docker-compose.yml` (db service):
-
-```yaml
-ports:
-  - "5433:5432"
-```
-
-Then connect with:
-
-- Local Postgres: `localhost:5432`
-- Docker Postgres: `localhost:5433`
 
 ## Technology Stack
 
@@ -119,111 +159,6 @@ investoryx-backend/
 │   ├── data_types/             # Enums (Period, Interval for historical data)
 │   └── utils/                  # Shared helpers (rate limiter, retry, formatters)
 └── tests/                      # Test suite
-```
-
-## Prerequisites
-
-- Python 3.12+
-- PostgreSQL database
-- Poetry (for dependency management)
-- Environment variables configured
-
-## Installation & Setup
-
-### 1. Clone and Navigate
-
-```bash
-cd investoryX-backend
-```
-
-### 2. Install Dependencies
-
-```bash
-# Using Poetry (recommended)
-poetry install
-
-```
-
-### 3. Environment Configuration
-
-Create a `.env` file in the root directory with:
-
-```env
-# Database
-DATABASE_URL=postgresql://username:password@localhost/database_name
-
-# Security
-SECRET_KEY=your_secret_key_here
-REFRESH_SECRET_KEY=your_refresh_secret_key_here
-ALGORITHM=HS256
-
-# Email Service
-RESEND_API_KEY=your_resend_api_key
-
-# Feature Flags
-DISABLE_EMAIL_VERIFICATION=false
-
-# Frontend URLs (for CORS)
-FRONTEND_BASE_URL=http://localhost:3000
-
-# Token Expiration
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-REFRESH_TOKEN_EXPIRE_DAYS=7
-EMAIL_TOKEN_EXPIRE_MINUTES=1440
-```
-
-### 4. Database Setup
-
-```bash
-# Run database migrations
-alembic upgrade head
-```
-
-### 5. Start the Server
-
-```bash
-# Development mode with auto-reload
-poetry run uvicorn src.main:app --reload
-
-# Better for debugging
-poetry run uvicorn src.main:app --reload --log-level debug
-
-# Production mode
-poetry run uvicorn src.main:app --host 0.0.0.0 --port 8000
-
-# Run via Docker (first time or after dependency changes)
-docker compose up --build
-
-# Run via Docker (no dependency changes)
-docker compose up
-```
-
-### Populate Stock Table
-
-The search features read from the db and to use this feature, you must populate the db with stocks via python script.
-
-With Docker this happens automatically on first startup (the `migrate` service runs the seed when the stocks table is empty). To re-run it manually:
-
-Run locally with Poetry:
-
-```bash
-poetry run python src/services/seed.py
-```
-
-Run inside Docker (recommended if backend uses Docker DB):
-
-```bash
-docker compose run --rm backend python src/services/seed.py
-```
-
-The server will start at `http://127.0.0.1:8000`
-
-#### Populate Stock Table via Claude Skill
-
-Run this command:
-
-```bash
-docker compose exec backend python -m src.services.seed
 ```
 
 ## API Endpoints
@@ -285,26 +220,40 @@ docker compose exec backend python -m src.services.seed
 
 ### Database Migrations
 
-```bash
-# Create new migration
-alembic revision --autogenerate -m "Description of changes"
+Run Alembic inside a container. The code is mounted, so new migration files land
+in your repo:
 
+```bash
 # Apply migrations
-alembic upgrade head
+docker compose run --rm migrate
+
+# Create new migration
+docker compose run --rm backend alembic revision --autogenerate -m "Description of changes"
 
 # Rollback migration
-alembic downgrade -1
+docker compose run --rm backend alembic downgrade -1
+```
+
+### Changing Dependencies
+
+The image installs from `poetry.lock`. Update it with Poetry in a throwaway
+container (the version that wrote the lock file), then rebuild:
+
+```bash
+docker run --rm -v "${PWD}:/app" -w /app python:3.12-slim sh -c "pip install -q poetry==2.2.1 && poetry add --lock <package>"
+docker compose up --build
 ```
 
 ### Testing
 
 ```bash
-# Run tests (when implemented)
-pytest
-
-# Run with coverage
-pytest --cov=src
+docker compose run --rm --no-deps -e DATABASE_URL=sqlite:// -e RATE_LIMIT_ENABLED=false backend sh -c "pip install -q pytest && python -m pytest"
 ```
+
+This runs the tests in a throwaway copy of the backend container. Tests use an
+in-memory SQLite database; overriding `DATABASE_URL` guarantees they never touch your
+dev Postgres, and `--no-deps` leaves the running stack alone. pytest is a dev
+dependency, so it's installed into the throwaway container each run.
 
 ## Environment Variables
 
