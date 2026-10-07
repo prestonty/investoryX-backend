@@ -11,7 +11,7 @@ class Stocks(Base):
 
     stock_id = Column(Integer,primary_key=True,nullable=False)
     company_name = Column(String,nullable=False)
-    ticker = Column(String,nullable=False,index=True)
+    ticker = Column(String,nullable=False,index=True,unique=True)
     exchange = Column(String,nullable=False)
     asset_type = Column(String,nullable=False)
 

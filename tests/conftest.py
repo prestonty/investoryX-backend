@@ -77,6 +77,7 @@ _SESSION_MODULES = [
     "src.trading_engine.services.pricing",
     "src.trading_engine.tasks.execute_paper_trades",
     "src.trading_engine.tasks.reconcile_portfolios",
+    "src.trading_engine.tasks.sync_listings",
 ]
 
 

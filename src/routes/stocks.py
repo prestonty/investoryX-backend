@@ -28,8 +28,8 @@ def normalize_ticker(ticker: str) -> str:
     return ticker.strip().upper().replace(".", "-")
 
 
-# The stock catalog is seeded by src/services/seed.py; there is deliberately no
-# public endpoint to add stocks.
+# The stock catalog is seeded by src/services/seed.py and kept current by the daily
+# stocks.sync_listings Celery task; there is deliberately no public endpoint to add stocks.
 
 
 class StockResponse(BaseModel):
