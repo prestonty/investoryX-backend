@@ -556,6 +556,7 @@ def _record_fill(
         executed_at=executed_at,
         source=MANUAL_SOURCE,
         balance_after=balance_after,
+        strategy_name=MANUAL_STRATEGY_NAME,
     )
     session.add(trade)
     session.add(

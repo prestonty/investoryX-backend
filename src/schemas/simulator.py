@@ -120,6 +120,8 @@ class SimulatorTradeResponse(BaseModel):
     executed_at: Optional[datetime]
     source: Optional[str] = "live"
     balance_after: Optional[Decimal] = None
+    # Strategy that decided the trade; "manual" for orders placed by hand.
+    strategy_name: Optional[str] = None
 
     class Config:
         from_attributes = True

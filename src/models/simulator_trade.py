@@ -21,3 +21,6 @@ class SimulatorTrade(Base):
     executed_at = Column(TIMESTAMP(timezone=True), server_default=text("now()"))
     source = Column(String, nullable=True, server_default="live")
     balance_after = Column(Numeric(12, 2), nullable=True)
+    # Strategy that decided the trade ("manual" for orders placed by hand);
+    # NULL for older trades whose strategy wasn't recorded.
+    strategy_name = Column(String, nullable=True)

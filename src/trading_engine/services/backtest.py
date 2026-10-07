@@ -287,6 +287,7 @@ class BacktestService:
             executed_at=datetime.combine(day, MARKET_OPEN, tzinfo=MARKET_TZ),
             source=BACKTEST_SOURCE,
             balance_after=run.cash,
+            strategy_name=run.strategy_name,
         ))
         run.ledger.append(SimulatorCashLedger(
             simulator_id=simulator_id,

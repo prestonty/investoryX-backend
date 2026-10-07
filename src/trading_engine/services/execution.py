@@ -471,6 +471,7 @@ class PaperTradeExecutionService:
             fill=result,
             executed_at=context.now,
             balance_after=context.cash_by_sim[sim_id],
+            strategy_name=signal.strategy_name,
         )
         self._mark(signal, SignalExecutionStatus.EXECUTED, context.now)
         return SignalOutcome.EXECUTED, trade
@@ -482,6 +483,7 @@ class PaperTradeExecutionService:
         fill: Fill,
         executed_at: datetime,
         balance_after: Decimal,
+        strategy_name: str,
     ) -> SimulatorTrade:
         return SimulatorTrade(
             simulator_id=simulator_id,
@@ -493,6 +495,7 @@ class PaperTradeExecutionService:
             executed_at=executed_at,
             source=LIVE_SOURCE,
             balance_after=balance_after,
+            strategy_name=strategy_name,
         )
 
     def _to_ledger_entry(self, trade: SimulatorTrade) -> SimulatorCashLedger:
